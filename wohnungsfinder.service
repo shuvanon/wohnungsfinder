@@ -1,0 +1,21 @@
+[Unit]
+Description=Berlin Wohnungsfinder Scraper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# ── Change these two lines to match your setup ────────────────────────────────
+User=youruser
+WorkingDirectory=/home/youruser/wohnungsfinder
+# ─────────────────────────────────────────────────────────────────────────────
+
+ExecStart=/usr/bin/python3 main.py
+Restart=on-failure
+RestartSec=30
+
+# Capture stdout/stderr in journald (use: journalctl -u wohnungsfinder -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

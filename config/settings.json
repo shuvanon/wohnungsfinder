@@ -1,0 +1,52 @@
+{
+  "telegram": {
+    "bot_token": "YOUR_BOT_TOKEN_HERE",
+    "chat_ids": [
+      "PERSON_1_CHAT_ID",
+      "PERSON_2_CHAT_ID"
+    ]
+  },
+
+  "hard_filters": {
+    "max_cold_rent": 1200,
+    "min_rooms": 1,
+    "max_rooms": null,
+    "block_if_wbs_required": false,
+    "block_wbs_categories": ["WBS 100", "WBS 140"],
+    "block_keywords": [
+      "Wohnen ab 55", "Wohnen ab 60", "Wohnen ab 65",
+      "Seniorenwohnung", "nur für Senioren",
+      "Studentenwohnung", "Studenten", "Studentenwerk"
+    ]
+  },
+
+  "priority_scoring": {
+    "rules": [
+      { "name": "No WBS required",          "field": "wbs",        "match": "nicht erforderlich", "points": 30 },
+      { "name": "Rent under €700",           "field": "cold_rent",  "max": 700,                    "points": 25 },
+      { "name": "Rent €700–€900",            "field": "cold_rent",  "min": 700, "max": 900,        "points": 15 },
+      { "name": "3+ rooms",                  "field": "rooms",      "min": 3,                       "points": 20 },
+      { "name": "2 rooms",                   "field": "rooms",      "min": 2, "max": 2,             "points": 10 },
+      { "name": "Has balcony",               "field": "features",   "contains": "Balkon",           "points": 10 },
+      { "name": "Has elevator",              "field": "features",   "contains": "Aufzug",           "points":  5 },
+      { "name": "Built after 2000",          "field": "year_built", "min": 2000,                    "points": 10 },
+      { "name": "District: Pankow",          "field": "district",   "contains": "Pankow",           "points": 15 },
+      { "name": "District: Mitte",           "field": "district",   "contains": "Mitte",            "points": 15 },
+      { "name": "District: F'hain-Kreuzberg","field": "district",   "contains": "Friedrichshain",   "points": 15 }
+    ],
+    "thresholds": {
+      "high":   50,
+      "medium": 25
+    }
+  },
+
+  "scraper": {
+    "url": "https://www.inberlinwohnen.de/wohnungsfinder",
+    "interval_minutes": 12,
+    "jitter_minutes":    3,
+    "request_timeout":  30,
+    "store_file": "data/listings.db",
+    "log_file":   "logs/scraper.log",
+    "log_level":  "INFO"
+  }
+}
