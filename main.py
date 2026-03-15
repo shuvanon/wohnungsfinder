@@ -7,6 +7,7 @@ Run this directly:  python main.py
 
 import logging
 import random
+import signal
 import sys
 import time
 from pathlib import Path
@@ -51,13 +52,13 @@ def run_cycle(
 
     # 1. Fetch
     try:
-        soup = fetch_page(scraper_cfg["url"], timeout=scraper_cfg.get("request_timeout", 30))
+        soup, session, csrf_token = fetch_page(scraper_cfg["url"], timeout=scraper_cfg.get("request_timeout", 30))
     except Exception as e:
         logger.error(f"Fetch failed: {e}")
         return
 
-    # 2. Parse
-    listings = parse_listings(soup)
+    # 2. Parse (passes session + csrf for Livewire pagination)
+    listings = parse_listings(soup, session=session, csrf_token=csrf_token)
     if not listings:
         logger.warning("Parser returned 0 listings — page structure may have changed")
         return
@@ -134,12 +135,30 @@ def main() -> None:
     base_interval = scraper_cfg["interval_minutes"] * 60
     jitter        = scraper_cfg.get("jitter_minutes", 3) * 60
 
-    while True:
-        run_cycle(cfg, store, hfilter, scorer, notifier)
+    # Graceful shutdown on SIGTERM (sent by Docker / systemd on stop)
+    shutdown = False
 
+    def _handle_sigterm(signum, frame):
+        nonlocal shutdown
+        logger.info("SIGTERM received — finishing current cycle then shutting down")
+        shutdown = True
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    while not shutdown:
+        run_cycle(cfg, store, hfilter, scorer, notifier)
+        if shutdown:
+            break
         sleep_secs = base_interval + random.randint(-jitter, jitter)
         logger.info(f"Sleeping {sleep_secs // 60}m {sleep_secs % 60}s until next check")
-        time.sleep(sleep_secs)
+        # Interruptible sleep — wakes immediately on SIGTERM
+        for _ in range(sleep_secs):
+            if shutdown:
+                break
+            time.sleep(1)
+
+    logger.info("Shutting down cleanly")
+    store.close()
 
 
 if __name__ == "__main__":

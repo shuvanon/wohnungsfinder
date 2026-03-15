@@ -1,8 +1,9 @@
 """
 fetcher.py — HTTP layer.
 
-Responsible solely for fetching the raw HTML from inberlinwohnen.de.
-All retry logic and session configuration lives here.
+Two public functions:
+  fetch_page()         — initial page fetch, returns (BeautifulSoup, session, csrf_token)
+  fetch_livewire_page() — call the Livewire /update endpoint to get a specific page
 """
 
 import logging
@@ -10,6 +11,10 @@ import requests
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+_BASE_URL = "https://www.inberlinwohnen.de"
+_WOHNUNGSFINDER_URL = f"{_BASE_URL}/wohnungsfinder"
+_LIVEWIRE_URL = f"{_BASE_URL}/livewire/update"
 
 _HEADERS = {
     "User-Agent": (
@@ -22,17 +27,86 @@ _HEADERS = {
 }
 
 
-def fetch_page(url: str, timeout: int = 30) -> BeautifulSoup:
+def fetch_page(url: str = _WOHNUNGSFINDER_URL, timeout: int = 30):
     """
-    Fetch `url` and return a BeautifulSoup tree.
+    Fetch the Wohnungsfinder page.
 
-    Raises:
-        requests.HTTPError  — on 4xx / 5xx responses
-        requests.Timeout    — if the server doesn't respond in time
-        requests.ConnectionError — on network failures
+    Returns:
+        (BeautifulSoup, requests.Session, csrf_token: str)
+
+    The session and CSRF token are needed for subsequent Livewire pagination
+    calls. The session carries the cookies set by the initial response.
     """
     logger.debug(f"GET {url}")
-    response = requests.get(url, headers=_HEADERS, timeout=timeout)
+    session = requests.Session()
+    session.headers.update(_HEADERS)
+    response = session.get(url, timeout=timeout)
     response.raise_for_status()
     logger.debug(f"Response {response.status_code}, {len(response.content)} bytes")
-    return BeautifulSoup(response.text, "lxml")
+
+    soup = BeautifulSoup(response.text, "lxml")
+
+    # CSRF token is in a <meta name="csrf-token"> tag
+    csrf_meta = soup.find("meta", {"name": "csrf-token"})
+    csrf_token = csrf_meta["content"] if csrf_meta else ""
+    if not csrf_token:
+        logger.warning("CSRF token not found in page — Livewire pagination may fail")
+
+    return soup, session, csrf_token
+
+
+def fetch_livewire_page(
+    session: requests.Session,
+    csrf_token: str,
+    component_id: str,
+    snapshot: str,
+    checksum: str,
+    page: int,
+    timeout: int = 30,
+) -> dict:
+    """
+    Call the Livewire /update endpoint to navigate to a specific page.
+
+    Livewire v3 protocol:
+      POST /livewire/update
+      Headers: X-CSRF-TOKEN, X-Livewire: true
+      Body: { components: [{ snapshot, updates: {}, calls: [setPage call] }] }
+
+    Returns the parsed JSON response or {} on failure.
+    """
+    headers = {
+        "X-CSRF-TOKEN": csrf_token,
+        "X-Livewire": "true",
+        "Content-Type": "application/json",
+        "Accept": "text/html, application/xhtml+xml",
+        "Referer": "https://www.inberlinwohnen.de/wohnungsfinder",
+    }
+
+    payload = {
+        "components": [
+            {
+                "snapshot": snapshot,
+                "updates": {},
+                "calls": [
+                    {
+                        "path": "",
+                        "method": "setPage",
+                        "params": [page, "page"],
+                    }
+                ],
+            }
+        ]
+    }
+
+    try:
+        resp = session.post(
+            _LIVEWIRE_URL,
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logger.error(f"Livewire page {page} fetch failed: {e}")
+        return {}

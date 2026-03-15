@@ -8,38 +8,42 @@
   },
 
   "hard_filters": {
-    "max_cold_rent": 1200,
+    "max_cold_rent": 700,
     "min_rooms": 1,
-    "max_rooms": null,
+    "max_rooms": 5,
     "block_if_wbs_required": false,
     "block_wbs_categories": ["WBS 100", "WBS 140"],
     "block_keywords": [
-      "Wohnen ab 55", "Wohnen ab 60", "Wohnen ab 65",
-      "Seniorenwohnung", "nur für Senioren",
-      "Studentenwohnung", "Studenten", "Studentenwerk"
+        "Wohnen ab 55", "Wohnen ab 60", "Wohnen ab 65",
+        "Seniorenwohnung", "nur für Senioren",
+        "Studentenwohnung", "Studenten", "Studentenwerk"
     ]
-  },
+},
 
-  "priority_scoring": {
+"priority_scoring": {
     "rules": [
-      { "name": "No WBS required",          "field": "wbs",        "match": "nicht erforderlich", "points": 30 },
-      { "name": "Rent under €700",           "field": "cold_rent",  "max": 700,                    "points": 25 },
-      { "name": "Rent €700–€900",            "field": "cold_rent",  "min": 700, "max": 900,        "points": 15 },
-      { "name": "3+ rooms",                  "field": "rooms",      "min": 3,                       "points": 20 },
-      { "name": "2 rooms",                   "field": "rooms",      "min": 2, "max": 2,             "points": 10 },
-      { "name": "Has balcony",               "field": "features",   "contains": "Balkon",           "points": 10 },
-      { "name": "Has elevator",              "field": "features",   "contains": "Aufzug",           "points":  5 },
-      { "name": "Built after 2000",          "field": "year_built", "min": 2000,                    "points": 10 },
-      { "name": "District: Pankow",          "field": "district",   "contains": "Pankow",           "points": 15 },
-      { "name": "District: Mitte",           "field": "district",   "contains": "Mitte",            "points": 15 },
-      { "name": "District: F'hain-Kreuzberg","field": "district",   "contains": "Friedrichshain",   "points": 15 }
+        { "name": "No WBS",                  "field": "wbs",        "match": "nicht erforderlich", "points": 30 },
+        { "name": "Cold Rent under €400",    "field": "cold_rent",  "max": 400,                    "points": 30 },
+        { "name": "Cold Rent €400–€600",     "field": "cold_rent",  "min": 400,  "max": 600,       "points": 20 },
+        { "name": "Cold Rent €600–€700",    "field": "cold_rent",  "min": 600,  "max": 700,      "points": 10 },
+        { "name": "Large: 2+ rooms",    "field": "rooms",      "min": 3,                       "points": 15 },
+        { "name": "Good: 2 rooms",      "field": "rooms",      "min": 2,    "max": 3,          "points": 10 },
+        { "name": "Ok: 1 rooms",        "field": "rooms",      "min": 1,    "max": 2,          "points": 5 },
+        { "name": "Large: 70m²+",       "field": "size_m2",    "min": 70,                      "points": 15 },
+        { "name": "Medium: 50–70m²",    "field": "size_m2",    "min": 50,   "max": 70,         "points": 10  },
+        { "name": "Small: 30–50m²",    "field": "size_m2",    "min": 30,   "max": 50,         "points": 5  },
+        { "name": "Has balcony",        "field": "features",   "contains": "Balkon",           "points": 5 },
+        { "name": "Has elevator",       "field": "features",   "contains": "Aufzug",           "points": 2  },
+        { "name": "Has garden",         "field": "features",   "contains": "Garten",           "points": 1 },
+        { "name": "Has fitted kitchen", "field": "features",   "contains": "Einbauküche",      "points": 10  },
+        { "name": "Has cellar",         "field": "features",   "contains": "Keller",           "points": 1  },
+        { "name": "Accessible",         "field": "features",   "contains": "Barrierefrei",     "points": 1  }
     ],
     "thresholds": {
-      "high":   50,
-      "medium": 25
+        "high":   60,
+        "medium": 25
     }
-  },
-
+},
   "scraper": {
     "url": "https://www.inberlinwohnen.de/wohnungsfinder",
     "interval_minutes": 12,
