@@ -48,7 +48,7 @@ info "Python $PYTHON_VERSION found"
 # ── 2. Install dependencies ────────────────────────────────────────────────────
 echo ""
 echo "Installing Python dependencies..."
-$PYTHON -m pip install --quiet --upgrade pip
+
 $PYTHON -m pip install --quiet -r "$PROJECT_DIR/requirements.txt"
 $PYTHON -m pip install --quiet pytest
 info "Dependencies installed"
