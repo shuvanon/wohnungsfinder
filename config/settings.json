@@ -1,9 +1,8 @@
 {
   "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN_HERE",
+    "bot_token": "***REMOVED***",
     "chat_ids": [
-      "PERSON_1_CHAT_ID",
-      "PERSON_2_CHAT_ID"
+      "***REMOVED***"
     ]
   },
 
