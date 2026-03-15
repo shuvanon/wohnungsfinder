@@ -9,7 +9,7 @@ no HTML text scraping needed.
 Parsing strategy:
   1. On the initial page, extract:
      - The main apartment-finder component snapshot (for pagination)
-     - All apartment-finder.item.list-view snapshots (the 10 listings)
+     - All apartment-finder.item.apartment-item snapshots (the 10 listings)
      - The shared iconMap (attribute ID → feature name)
   2. For pages 2–N, call the Livewire /update endpoint (via fetcher) and
      parse the returned HTML fragments the same way.
@@ -48,7 +48,7 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 # Human-readable names for flat_attribute_id values
-# Derived from the iconMap in apartment-finder.item.partials.attributes snapshots
+# Derived from the iconMap in apartment-finder.item.partials.attributes-list snapshots
 _ATTRIBUTE_NAMES: dict[int, str] = {
     3:  "Stellplatz",
     4:  "Loggia",
@@ -148,7 +148,7 @@ def _find_main_component(snapshots: list[dict]) -> Optional[dict]:
     """
     for snap in snapshots:
         memo = snap.get("memo", {})
-        if memo.get("name") == "apartment-finder" or (
+        if memo.get("name") == "apartment-finder.rentable-apartment-finder" or (
             isinstance(snap.get("data"), dict)
             and "itemsPerPage" in snap.get("data", {})
         ):
@@ -161,9 +161,9 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
     Extract structured listing dicts from a list of Livewire snapshots.
 
     Each listing is represented by a cluster of snapshots:
-      - apartment-finder.item.list-view  → item data (rent, rooms, area, title, etc.)
+      - apartment-finder.item.apartment-item  → item data (rent, rooms, area, title, etc.)
       - apartment-finder.item.partials.collapsible-apartment-title → address fields
-      - apartment-finder.item.partials.attributes → feature attribute IDs
+      - apartment-finder.item.partials.attributes-list → feature attribute IDs
     """
     # Index snapshots by name for easy lookup
     by_name: dict[str, list[dict]] = {}
@@ -171,9 +171,9 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
         name = snap.get("memo", {}).get("name", "")
         by_name.setdefault(name, []).append(snap)
 
-    list_views = by_name.get("apartment-finder.item.list-view", [])
+    list_views = by_name.get("apartment-finder.item.apartment-item", [])
     titles     = by_name.get("apartment-finder.item.partials.collapsible-apartment-title", [])
-    attributes = by_name.get("apartment-finder.item.partials.attributes", [])
+    attributes = by_name.get("apartment-finder.item.partials.attributes-list", [])
 
     # Build lookup dicts by itemId / flatId
     title_by_id: dict[int, dict] = {}
@@ -221,6 +221,19 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
 
         item_id = item.get("id")
 
+        # Extract feature IDs directly from item["attributes"] in the apartment-item snapshot
+        # Structure: [[[ {flat_attribute_id: N}, ...], ...], {"s":"arr"}]
+        raw_attributes = item.get("attributes", [])
+        attr_ids_from_item: list[int] = []
+        if raw_attributes and isinstance(raw_attributes[0], list):
+            for entry in raw_attributes[0]:
+                if isinstance(entry, list):
+                    for obj in entry:
+                        if isinstance(obj, dict) and "flat_attribute_id" in obj:
+                            attr_ids_from_item.append(obj["flat_attribute_id"])
+                elif isinstance(entry, dict) and "flat_attribute_id" in entry:
+                    attr_ids_from_item.append(entry["flat_attribute_id"])
+
         # Get address fields from title snapshot
         title_data = title_by_id.get(item_id, {})
         street   = title_data.get("street", "")
@@ -230,7 +243,8 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
         address  = f"{street} {number}, {zip_code}, {district}".strip(", ")
 
         # Features from attribute IDs
-        attr_ids = attr_by_id.get(item_id, [])
+        # Fall back to attributes-list snapshot if item attrs empty
+        attr_ids = attr_ids_from_item or attr_by_id.get(item_id, [])
         features = _features_from_attribute_ids(attr_ids)
 
         title    = item.get("title", "")
@@ -257,7 +271,7 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
             "size_m2":    _parse_german_float(item.get("area", "")),
             "cold_rent":  _parse_german_float(item.get("rentNet", "")),
             "total_rent": float(item.get("rentGross")) if item.get("rentGross") else None,
-            "wbs":        _extract_wbs(title),
+            "wbs":        "erforderlich" if item.get("hasWbs") else "nicht erforderlich",
             "available":  item.get("occupationDate", ""),
             "posted":     posted,
             "floor":      floor,

@@ -17,7 +17,6 @@ from bs4 import BeautifulSoup
 from scraper.parser import (
     _parse_german_float,
     _parse_year,
-    _extract_wbs,
     _features_from_attribute_ids,
     _get_snapshots,
     _parse_listing_snapshots,
@@ -95,6 +94,7 @@ def _make_listing_html(
                 "extraCosts": "150,00",
                 "rentGross": rent_gross,
                 "createdAt": created_at,
+                "hasWbs": ("wbs" in title.lower()),
                 "attributes": [[{"id": 1, "flat_id": item_id, "flat_attribute_id": aid} for aid in attr_ids], {"s": "arr"}],
                 "company": [{"name": "Test GmbH"}, {"s": "arr"}],
             },
@@ -125,7 +125,7 @@ def _make_listing_html(
     }
 
     return (
-        _snap_html("apartment-finder.item.list-view", item_data, tag="div", classes="mb-3") +
+        _snap_html("apartment-finder.item.apartment-item", item_data, tag="div", classes="mb-3") +
         _snap_html("apartment-finder.item.partials.collapsible-apartment-title", title_data, tag="span", classes="block") +
         _snap_html("apartment-finder.item.partials.attributes", attr_data, tag="div", classes="text-sm mb-2 grid")
     )
@@ -187,24 +187,27 @@ class TestParseYear(unittest.TestCase):
         self.assertEqual(_parse_year(2025), 2025)
 
 
-# ── TestExtractWbs ─────────────────────────────────────────────────────────────
+# ── TestWbsFromHasWbsField ────────────────────────────────────────────────────
 
-class TestExtractWbs(unittest.TestCase):
+class TestWbsFromHasWbsField(unittest.TestCase):
+    """WBS is now read directly from the hasWbs boolean field in the snapshot."""
 
-    def test_wbs_in_title(self):
-        self.assertEqual(_extract_wbs("Schöne Wohnung WBS 160 erforderlich"), "erforderlich")
+    def _listing_with_wbs(self, has_wbs: bool) -> dict:
+        html = _make_listing_html(
+            title="WBS Wohnung" if has_wbs else "Freie Wohnung",
+            item_id=1,
+        )
+        snaps = _get_snapshots(BeautifulSoup(html, "lxml"))
+        listings = _parse_listing_snapshots(snaps)
+        return listings[0] if listings else {}
 
-    def test_no_wbs_in_title(self):
-        self.assertEqual(_extract_wbs("Helle Wohnung in Pankow"), "nicht erforderlich")
+    def test_has_wbs_true_returns_erforderlich(self):
+        listing = self._listing_with_wbs(True)
+        self.assertEqual(listing["wbs"], "erforderlich")
 
-    def test_wbs_lowercase(self):
-        self.assertEqual(_extract_wbs("wbs required"), "erforderlich")
-
-    def test_empty_title(self):
-        self.assertEqual(_extract_wbs(""), "nicht erforderlich")
-
-    def test_none_title(self):
-        self.assertEqual(_extract_wbs(None), "nicht erforderlich")
+    def test_has_wbs_false_returns_nicht_erforderlich(self):
+        listing = self._listing_with_wbs(False)
+        self.assertEqual(listing["wbs"], "nicht erforderlich")
 
 
 # ── TestFeaturesFromAttributeIds ──────────────────────────────────────────────

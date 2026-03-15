@@ -2,6 +2,7 @@
   "telegram": {
     "bot_token": "***REMOVED***",
     "chat_ids": [
+      "***REMOVED***",
       "***REMOVED***"
     ]
   },
