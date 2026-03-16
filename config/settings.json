@@ -12,11 +12,12 @@
     "min_rooms": 1,
     "max_rooms": 5,
     "block_if_wbs_required": false,
-    "block_wbs_categories": ["WBS 100", "WBS 140"],
+    "block_wbs_categories": ["WBS 100", "WBS 140", "WBS 160"],
     "block_keywords": [
         "Wohnen ab 55", "Wohnen ab 60", "Wohnen ab 65",
         "Seniorenwohnung", "nur für Senioren",
-        "Studentenwohnung", "Studenten", "Studentenwerk"
+        "Studentenwohnung", "Studenten", "Studentenwerk",
+        "WBS 100", "WBS 140", "WBS 160"
     ]
 },
 

@@ -84,7 +84,7 @@ class HardFilter:
         return None
 
     def _check_rent(self, listing: dict) -> FilterResult | None:
-        """Block listings above the maximum cold rent."""
+        """Block listings above the maximum rent."""
         max_rent = self._cfg.get("max_rent")
         if max_rent is None:
             return None
@@ -93,7 +93,7 @@ class HardFilter:
         if total_rent is not None and total_rent > max_rent:
             return FilterResult(
                 passed=False,
-                reason=f"Cold rent €{total_rent:.2f} exceeds max €{max_rent}"
+                reason=f"Total rent €{total_rent:.2f} exceeds max €{max_rent}"
             )
         return None
 
