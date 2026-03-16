@@ -8,7 +8,7 @@
   },
 
   "hard_filters": {
-    "max_cold_rent": 700,
+    "max_rent": 1100,
     "min_rooms": 1,
     "max_rooms": 5,
     "block_if_wbs_required": false,
@@ -23,9 +23,9 @@
 "priority_scoring": {
     "rules": [
         { "name": "No WBS",                  "field": "wbs",        "match": "nicht erforderlich", "points": 30 },
-        { "name": "Cold Rent under €400",    "field": "cold_rent",  "max": 400,                    "points": 30 },
-        { "name": "Cold Rent €400–€600",     "field": "cold_rent",  "min": 400,  "max": 600,       "points": 20 },
-        { "name": "Cold Rent €600–€700",    "field": "cold_rent",  "min": 600,  "max": 700,      "points": 10 },
+        { "name": "Total Rent under €700",    "field": "total_rent",  "max": 700,                    "points": 30 },
+        { "name": "Total Rent €700–€900",     "field": "total_rent",  "min": 700,  "max": 900,       "points": 20 },
+        { "name": "Total Rent €900–€1100",    "field": "total_rent",  "min": 900,  "max": 1100,      "points": 10 },
         { "name": "Large: 2+ rooms",    "field": "rooms",      "min": 3,                       "points": 15 },
         { "name": "Good: 2 rooms",      "field": "rooms",      "min": 2,    "max": 3,          "points": 10 },
         { "name": "Ok: 1 rooms",        "field": "rooms",      "min": 1,    "max": 2,          "points": 5 },
