@@ -410,6 +410,10 @@ def parse_listings(soup: BeautifulSoup, session=None, csrf_token: str = "") -> l
         page_snapshots = _get_snapshots(page_soup)
         page_listings = _parse_listing_snapshots(page_snapshots)
 
+        if not page_listings:
+            logger.warning(f"Page {page} returned no listings — stopping early")
+            break
+
         new_count = 0
         for listing in page_listings:
             if listing["url"] not in seen_urls:
@@ -418,10 +422,6 @@ def parse_listings(soup: BeautifulSoup, session=None, csrf_token: str = "") -> l
                 new_count += 1
 
         logger.debug(f"Page {page}: {new_count} new listings")
-
-        if not page_listings:
-            logger.warning(f"Page {page} returned no listings — stopping early")
-            break
 
     logger.info(f"Parsed {len(all_listings)} listings total across {total_pages} pages")
     return all_listings
