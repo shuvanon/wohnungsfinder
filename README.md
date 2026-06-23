@@ -166,7 +166,7 @@ Listings matching any hard filter are dropped entirely and never scored or notif
 
 | Key | Type | Description |
 |---|---|---|
-| `max_cold_rent` | number or null | Block listings above this base rent (€) |
+| `max_total_rent` | number or null | Block listings above this total rent / Warmmiete (€) |
 | `min_rooms` | number or null | Block listings with fewer rooms |
 | `max_rooms` | number or null | Block listings with more rooms |
 | `block_if_wbs_required` | bool | Block all WBS-required listings |

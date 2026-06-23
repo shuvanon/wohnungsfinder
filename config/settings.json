@@ -8,7 +8,7 @@
   },
 
   "hard_filters": {
-    "max_rent": 1100,
+    "max_total_rent": 1100,
     "min_rooms": 1,
     "max_rooms": 5,
     "block_if_wbs_required": false,

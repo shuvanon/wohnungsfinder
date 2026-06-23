@@ -22,7 +22,7 @@ from tests.fixtures import (
 def _make_filter(**overrides) -> HardFilter:
     """Create a HardFilter with sensible defaults, optionally overriding keys."""
     cfg = {
-        "max_cold_rent":        1200,
+        "max_total_rent":        1200,
         "min_rooms":            1,
         "max_rooms":            None,
         "block_if_wbs_required": False,
@@ -104,30 +104,30 @@ class TestWBSBlock(unittest.TestCase):
 class TestRentBlock(unittest.TestCase):
 
     def test_blocks_above_max_rent(self):
-        hf = _make_filter(max_cold_rent=1200)
-        result = hf.check(EXPENSIVE_LISTING)  # €1305
+        hf = _make_filter(max_total_rent=1200)
+        result = hf.check(EXPENSIVE_LISTING)  # total_rent €1485
         self.assertFalse(result.passed)
-        self.assertIn("1305", result.reason)
+        self.assertIn("1485", result.reason)
 
     def test_allows_at_max_rent(self):
-        hf = _make_filter(max_cold_rent=469.27)
-        result = hf.check(GOOD_LISTING)  # exactly €469.27
+        hf = _make_filter(max_total_rent=574.39)
+        result = hf.check(GOOD_LISTING)  # exactly total_rent €574.39
         self.assertTrue(result.passed)
 
     def test_allows_below_max_rent(self):
-        hf = _make_filter(max_cold_rent=1200)
-        result = hf.check(GOOD_LISTING)  # €469.27
+        hf = _make_filter(max_total_rent=1200)
+        result = hf.check(GOOD_LISTING)  # total_rent €574.39
         self.assertTrue(result.passed)
 
     def test_no_rent_passes_check(self):
         """Listings where rent couldn't be parsed should not be blocked by rent filter."""
-        hf = _make_filter(max_cold_rent=500)
-        listing = {**GOOD_LISTING, "cold_rent": None}
+        hf = _make_filter(max_total_rent=500)
+        listing = {**GOOD_LISTING, "total_rent": None}
         result = hf.check(listing)
         self.assertTrue(result.passed)
 
     def test_no_max_rent_config_always_passes(self):
-        hf = _make_filter(max_cold_rent=None)
+        hf = _make_filter(max_total_rent=None)
         result = hf.check(EXPENSIVE_LISTING)
         self.assertTrue(result.passed)
 
