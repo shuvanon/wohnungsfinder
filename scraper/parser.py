@@ -270,7 +270,10 @@ def _parse_listing_snapshots(snapshots: list[dict]) -> list[dict]:
             "rooms":      _parse_german_float(item.get("rooms", "")),
             "size_m2":    _parse_german_float(item.get("area", "")),
             "cold_rent":  _parse_german_float(item.get("rentNet", "")),
-            "total_rent": float(item.get("rentGross")) if item.get("rentGross") else None,
+            "total_rent": (
+                float(raw_gross) if isinstance(raw_gross := item.get("rentGross"), (int, float))
+                else _parse_german_float(str(raw_gross) if raw_gross is not None else "")
+            ),
             "wbs":        "erforderlich" if item.get("hasWbs") else "nicht erforderlich",
             "available":  item.get("occupationDate", ""),
             "posted":     posted,
