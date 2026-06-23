@@ -56,9 +56,7 @@ class PriorityScorer:
                 matched = self._match_string(value, rule["match"])
 
             elif "contains" in rule:
-                # Search the specific field AND the full raw_text
-                haystack = str(value or "") + " " + listing.get("raw_text", "")
-                matched = rule["contains"].lower() in haystack.lower()
+                matched = rule["contains"].lower() in str(value or "").lower()
 
             elif "min" in rule or "max" in rule:
                 matched = self._match_range(value, rule.get("min"), rule.get("max"))

@@ -45,7 +45,7 @@ def format_notification(listing: dict, result: PriorityResult) -> str:
 
     lines += [
         "",
-        f'🔗 <a href="{listing["url"]}">View full listing →</a>',
+        f'🔗 <a href="{listing.get("url", "")}">View full listing →</a>',
     ]
 
     return "\n".join(lines)

@@ -7,6 +7,8 @@ Two public functions:
 """
 
 import logging
+import time
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -98,15 +100,19 @@ def fetch_livewire_page(
         ]
     }
 
-    try:
-        resp = session.post(
-            _LIVEWIRE_URL,
-            json=payload,
-            headers=headers,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logger.error(f"Livewire page {page} fetch failed: {e}")
-        return {}
+    for attempt in range(1, 4):
+        try:
+            resp = session.post(
+                _LIVEWIRE_URL,
+                json=payload,
+                headers=headers,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"Livewire page {page} fetch failed (attempt {attempt}/3): {e}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)
+    logger.error(f"Livewire page {page} fetch failed after 3 attempts — giving up")
+    return {}

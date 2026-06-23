@@ -63,8 +63,16 @@ class ListingStore:
         """Return only listings whose URL is not yet in the database."""
         if not listings:
             return []
-        urls = {row[0] for row in self._conn.execute("SELECT url FROM listings")}
-        return [l for l in listings if l["url"] not in urls]
+        candidate_urls = [l["url"] for l in listings]
+        placeholders = ",".join("?" * len(candidate_urls))
+        seen = {
+            row[0]
+            for row in self._conn.execute(
+                f"SELECT url FROM listings WHERE url IN ({placeholders})",
+                candidate_urls,
+            )
+        }
+        return [l for l in listings if l["url"] not in seen]
 
     def mark_seen(self, listings: list[dict]) -> None:
         """
