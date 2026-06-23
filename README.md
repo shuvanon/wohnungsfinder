@@ -5,7 +5,7 @@ Monitors [inberlinwohnen.de](https://www.inberlinwohnen.de/wohnungsfinder) every
 ## How it works
 
 Each scrape cycle:
-1. Fetches all listings from inberlinwohnen.de
+1. Fetches the Wohnungsfinder page and paginates through all listings via the Livewire API
 2. Finds listings not seen before
 3. Marks them as seen in a local SQLite database
 4. Runs each new listing through hard filters — blocked listings are dropped
@@ -27,8 +27,8 @@ wohnungsfinder/
 │   ├── loader.py                  # Config validation
 │   └── settings.json              # All user-facing configuration
 ├── scraper/
-│   ├── fetcher.py                 # HTTP fetching
-│   ├── parser.py                  # HTML → listing dicts + district lookup
+│   ├── fetcher.py                 # HTTP fetching + Livewire pagination
+│   ├── parser.py                  # Livewire snapshots → listing dicts
 │   └── store.py                   # SQLite store (listings + filter audit log)
 ├── filters/
 │   ├── hard_filter.py             # Block unwanted listings
@@ -43,7 +43,7 @@ wohnungsfinder/
 │   └── scraper.log                # Log file (auto-created on first run)
 └── tests/
     ├── fixtures.py                # Shared test listing dicts
-    ├── test_parser.py             # 20 tests
+    ├── test_parser.py             # 22 tests
     ├── test_hard_filter.py        # 17 tests
     ├── test_priority.py           # 18 tests
     ├── test_store.py              # 22 tests
@@ -56,13 +56,13 @@ wohnungsfinder/
 ### 1. Copy the project to your server
 
 ```bash
-scp -r wohnungsfinder/ youruser@your-server-ip:~/wohnungsfinder
+scp -r wohnungsfinder/ youruser@your-server-ip:~/services/wohnungsfinder
 ```
 
 Or clone from git:
 
 ```bash
-git clone https://github.com/youruser/wohnungsfinder.git ~/wohnungsfinder
+git clone https://github.com/youruser/wohnungsfinder.git ~/services/wohnungsfinder
 ```
 
 ### 2. Set up Telegram
@@ -78,10 +78,12 @@ git clone https://github.com/youruser/wohnungsfinder.git ~/wohnungsfinder
 2. Open `https://api.telegram.org/botYOUR_TOKEN/getUpdates` in a browser
 3. Find `"chat": {"id": 123456789}` — that number is their chat ID
 
+If `getUpdates` returns an empty result, try `https://api.telegram.org/botYOUR_TOKEN/getUpdates?offset=-1` to force the latest update.
+
 ### 3. Configure
 
 ```bash
-nano ~/wohnungsfinder/config/settings.json
+nano ~/services/wohnungsfinder/config/settings.json
 ```
 
 Fill in your credentials:
@@ -102,12 +104,12 @@ Then tune `hard_filters` and `priority_scoring` to your preferences — see **Co
 ### 4. Run setup
 
 ```bash
-cd ~/wohnungsfinder
+cd ~/services/wohnungsfinder
 chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 120 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 132 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -116,7 +118,7 @@ sudo systemctl status wohnungsfinder
 sudo journalctl -u wohnungsfinder -f
 ```
 
-You should see the scraper start, parse ~250 listings, and go to sleep for ~12 minutes.
+You should see the scraper start, paginate through ~240 listings across ~24 pages, and go to sleep for ~12 minutes.
 
 ## Useful commands
 
@@ -128,13 +130,13 @@ sudo systemctl restart wohnungsfinder
 sudo journalctl -u wohnungsfinder -n 100
 
 # Query the database directly
-sqlite3 ~/wohnungsfinder/data/listings.db
+sqlite3 ~/services/wohnungsfinder/data/listings.db
 
 # How many listings seen total?
 # SELECT COUNT(*) FROM listings;
 
 # Recent HIGH priority listings that passed filters:
-# SELECT address, cold_rent, seen_at FROM listings
+# SELECT address, cold_rent, total_rent, seen_at FROM listings
 #   JOIN filter_results USING(url)
 #   WHERE passed=1 AND priority='🔴 HIGH'
 #   ORDER BY seen_at DESC LIMIT 20;
@@ -142,6 +144,9 @@ sqlite3 ~/wohnungsfinder/data/listings.db
 # Why were listings blocked?
 # SELECT block_reason, COUNT(*) FROM filter_results
 #   WHERE passed=0 GROUP BY block_reason ORDER BY 2 DESC;
+
+# Score breakdown for a specific listing:
+# SELECT reasons FROM filter_results WHERE url='https://...' ORDER BY seen_at DESC LIMIT 1;
 ```
 
 ## Configuration reference
@@ -161,23 +166,24 @@ Listings matching any hard filter are dropped entirely and never scored or notif
 
 | Key | Type | Description |
 |---|---|---|
-| `max_cold_rent` | number or null | Block listings above this cold rent (€) |
+| `max_cold_rent` | number or null | Block listings above this base rent (€) |
 | `min_rooms` | number or null | Block listings with fewer rooms |
 | `max_rooms` | number or null | Block listings with more rooms |
 | `block_if_wbs_required` | bool | Block all WBS-required listings |
 | `block_wbs_categories` | list | Block specific WBS categories e.g. `["WBS 100"]` |
-| `block_keywords` | list | Block listings whose title/address contains any of these strings (case-insensitive) |
+| `block_keywords` | list | Block listings whose title contains any of these strings (case-insensitive) |
 
 ### `priority_scoring`
 
-Each rule adds points if the listing matches. Final score determines the label.
+Each rule adds points if the listing matches. Final score determines the label: 🔴 HIGH, 🟡 MEDIUM, or ⚪ LOW.
 
 ```json
 "rules": [
-    { "name": "No WBS required", "field": "wbs",       "match": "nicht erforderlich", "points": 30 },
-    { "name": "Rent under €700", "field": "cold_rent",  "max": 700,                    "points": 25 },
-    { "name": "Has balcony",     "field": "features",   "contains": "Balkon",           "points": 10 },
-    { "name": "District: Mitte", "field": "district",   "contains": "Mitte",            "points": 15 }
+    { "name": "No WBS required",  "field": "wbs",        "match": "nicht erforderlich", "points": 30 },
+    { "name": "Total rent <€900", "field": "total_rent",  "max": 900,                    "points": 25 },
+    { "name": "Total rent <€1100","field": "total_rent",  "min": 900, "max": 1100,       "points": 15 },
+    { "name": "Has balcony",      "field": "features",    "contains": "Balkon",           "points": 10 },
+    { "name": "District: Mitte",  "field": "district",    "contains": "Mitte",            "points": 15 }
 ],
 "thresholds": {
     "high":   50,
@@ -192,10 +198,25 @@ Rule match types:
 | `match` | `"match": "nicht erforderlich"` | Field equals this value exactly |
 | `contains` | `"contains": "Balkon"` | Field contains this substring |
 | `min` | `"min": 3` | Numeric field ≥ value |
-| `max` | `"max": 700` | Numeric field ≤ value |
-| `min` + `max` | `"min": 700, "max": 900` | Numeric field is within range |
+| `max` | `"max": 900` | Numeric field ≤ value |
+| `min` + `max` | `"min": 900, "max": 1100` | Numeric field is within range |
 
-Available fields: `wbs`, `cold_rent`, `total_rent`, `rooms`, `size_m2`, `year_built`, `district`, `features`, `address`.
+**Available fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `cold_rent` | number | Base rent (Kaltmiete) in € |
+| `total_rent` | number | Total rent incl. extras (Warmmiete) in € — recommended for scoring |
+| `rooms` | number | Number of rooms |
+| `size_m2` | number | Living area in m² |
+| `year_built` | number | Year of construction |
+| `wbs` | text | `"nicht erforderlich"` or `"erforderlich"` |
+| `district` | text | Berlin Bezirk e.g. `"Pankow"`, `"Mitte"` |
+| `address` | text | Full address string |
+| `title` | text | Listing title |
+| `features` | list | `"Balkon"`, `"Loggia"`, `"Aufzug"`, `"Keller"`, `"Garten"`, `"Barrierefrei"`, `"Rollstuhlgerecht"`, `"Einbauküche"`, `"Badewanne"`, `"Dusche"`, `"Gäste WC"`, `"Parkett"`, `"Stellplatz"`, `"Tiefgarage"`, `"Möbliert"` |
+
+> **Note on cold rent vs total rent:** `cold_rent` is the base rent shown prominently on each listing card. `total_rent` includes additional costs (Nebenkosten) and is what you actually pay each month. Using `total_rent` for scoring is more accurate since Nebenkosten vary significantly between buildings.
 
 ### `scraper`
 
@@ -208,26 +229,28 @@ Available fields: `wbs`, `cold_rent`, `total_rent`, `rooms`, `size_m2`, `year_bu
 | `log_file` | `logs/scraper.log` | Path to log file |
 | `log_level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
+## Viewing the data
+
+The SQLite database at `data/listings.db` contains two tables:
+
+**`listings`** — every apartment ever seen, with all parsed fields.
+
+**`filter_results`** — one row per new listing per cycle, recording whether it passed filters, why it was blocked, its priority label, score, and score breakdown.
+
+You can query it directly on the server with `sqlite3`, or copy it to your local machine and open it in a GUI like [TablePlus](https://tableplus.com/) or [DBeaver](https://dbeaver.io/).
+
 ## Running tests
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-120 tests covering parser, hard filter, priority scorer, store, formatter, and Telegram notifier.
+132 tests covering parser, hard filter, priority scorer, store, formatter, and Telegram notifier.
 
-## Adding a district not being recognized
+## Updating the code
 
-If you see a warning like:
-
+```bash
+cd ~/services/wohnungsfinder
+git pull
+sudo systemctl restart wohnungsfinder
 ```
-Unknown postcode '12345' in address '...'. Add it to data/berlin_postcodes.json.
-```
-
-Open `data/berlin_postcodes.json` and add the entry:
-
-```json
-"12345": "Bezirksname"
-```
-
-Then restart the service.
