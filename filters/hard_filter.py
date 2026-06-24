@@ -14,6 +14,26 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _searchable_text(listing: dict) -> str:
+    """
+    Concatenate the listing's text fields for keyword / WBS-category matching.
+
+    Includes the detail-page fields (detail_text, description_summary, wbs_tier)
+    when present — i.e. after enrichment, so markers buried in the listing body
+    are caught. At the cheap pre-filter stage only title/address are available,
+    which is fine; the post-enrichment re-filter sees the full text.
+    """
+    parts = (
+        listing.get("title"),
+        listing.get("address"),
+        listing.get("wbs_tier"),
+        listing.get("description_summary"),
+        listing.get("detail_text"),
+        listing.get("raw_text"),  # legacy; currently always empty
+    )
+    return " ".join(part for part in parts if part).lower()
+
+
 @dataclass
 class FilterResult:
     passed: bool
@@ -52,11 +72,9 @@ class HardFilter:
     # ── Individual rules ───────────────────────────────────────────────────
 
     def _check_keywords(self, listing: dict) -> FilterResult | None:
-        """Block listings whose title or body contains a disallowed keyword."""
+        """Block listings whose text contains a disallowed keyword."""
         keywords: list[str] = self._cfg.get("block_keywords", [])
-        searchable = (
-            (listing.get("title") or "") + " " + (listing.get("raw_text") or "")
-        ).lower()
+        searchable = _searchable_text(listing)
 
         for kw in keywords:
             if kw.lower() in searchable:
@@ -76,7 +94,7 @@ class HardFilter:
     def _check_wbs_categories(self, listing: dict) -> FilterResult | None:
         """Block specific WBS income tiers (e.g. WBS 100, WBS 140)."""
         blocked: list[str] = self._cfg.get("block_wbs_categories", [])
-        searchable = (listing.get("raw_text") or "").lower()
+        searchable = _searchable_text(listing)
 
         for category in blocked:
             if category.lower() in searchable:

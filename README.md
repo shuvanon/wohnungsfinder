@@ -70,7 +70,7 @@ wohnungsfinder/
 └── tests/
     ├── fixtures.py                # Shared test listing dicts
     ├── test_parser.py             # 22 tests
-    ├── test_hard_filter.py        # 17 tests
+    ├── test_hard_filter.py        # 22 tests
     ├── test_priority.py           # 18 tests
     ├── test_store.py              # 29 tests
     ├── test_formatter.py          # 14 tests
@@ -137,7 +137,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 170 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 175 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -197,9 +197,9 @@ Listings matching any hard filter are dropped entirely and never scored or notif
 | `max_total_rent` | number or null | Block listings above this total rent / Warmmiete (€) |
 | `min_rooms` | number or null | Block listings with fewer rooms |
 | `max_rooms` | number or null | Block listings with more rooms |
-| `block_if_wbs_required` | bool | Block all WBS-required listings |
-| `block_wbs_categories` | list | Block specific WBS categories e.g. `["WBS 100"]` |
-| `block_keywords` | list | Block listings whose title contains any of these strings (case-insensitive) |
+| `block_if_wbs_required` | bool | Block all WBS-required listings (set `true` if you don't hold a WBS) |
+| `block_wbs_categories` | list | Block specific WBS categories e.g. `["WBS 100"]`. Matched against title, address, and — once enriched — the detail text / `wbs_tier`. |
+| `block_keywords` | list | Block listings whose text contains any of these strings (case-insensitive). Searches title + address, plus the detail text / description once enriched (so markers buried in the listing body are caught). Without enrichment, only the title/address are available. |
 
 ### `priority_scoring`
 
@@ -314,7 +314,7 @@ You can query it directly on the server with `sqlite3`, or copy it to your local
 python3 -m unittest discover -s tests -v
 ```
 
-170 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
+175 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
 ## Updating the code
 

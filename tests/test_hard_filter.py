@@ -64,6 +64,26 @@ class TestKeywordBlock(unittest.TestCase):
         if not result.passed:
             self.assertNotIn("keyword", result.reason.lower())
 
+    def test_blocks_keyword_in_detail_text(self):
+        # Marker hidden in the detail-page body (post-enrichment), not the title.
+        hf = _make_filter()
+        listing = {**GOOD_LISTING, "detail_text": "Diese Seniorenwohnung liegt zentral"}
+        result = hf.check(listing)
+        self.assertFalse(result.passed)
+        self.assertIn("keyword", result.reason.lower())
+
+    def test_blocks_keyword_in_address(self):
+        hf = _make_filter()
+        listing = {**GOOD_LISTING, "address": "Studentenwerk-Straße 1, 10115"}
+        result = hf.check(listing)
+        self.assertFalse(result.passed)
+
+    def test_blocks_keyword_in_description_summary(self):
+        hf = _make_filter()
+        listing = {**GOOD_LISTING, "description_summary": "Schöne Studentenwohnung am Campus"}
+        result = hf.check(listing)
+        self.assertFalse(result.passed)
+
 
 class TestWBSBlock(unittest.TestCase):
 
@@ -94,11 +114,25 @@ class TestWBSBlock(unittest.TestCase):
         self.assertIn("WBS 100", result.reason)
 
     def test_allows_unlisted_wbs_category(self):
-        hf = _make_filter(block_wbs_categories=["WBS 100"])
+        hf = _make_filter(block_if_wbs_required=False, block_wbs_categories=["WBS 100"])
         # WBS 220 is not in the blocklist
         listing = {**GOOD_LISTING, "wbs": "erforderlich", "raw_text": "WBS 220 erforderlich"}
         result = hf.check(listing)
         self.assertTrue(result.passed)
+
+    def test_blocks_wbs_category_in_description_summary(self):
+        hf = _make_filter(block_wbs_categories=["WBS 140"])
+        listing = {**GOOD_LISTING, "description_summary": "Vergabe nur mit WBS 140"}
+        result = hf.check(listing)
+        self.assertFalse(result.passed)
+        self.assertIn("WBS 140", result.reason)
+
+    def test_blocks_wbs_category_in_wbs_tier(self):
+        hf = _make_filter(block_wbs_categories=["WBS 160"])
+        listing = {**GOOD_LISTING, "wbs_tier": "WBS 160"}
+        result = hf.check(listing)
+        self.assertFalse(result.passed)
+        self.assertIn("WBS 160", result.reason)
 
 
 class TestRentBlock(unittest.TestCase):
