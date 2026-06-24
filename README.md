@@ -311,8 +311,18 @@ You can query it directly on the server with `sqlite3`, or copy it to your local
 ## Running tests
 
 ```bash
-python3 -m unittest discover -s tests -v
+./run-tests.sh           # activates venv if present, prefers pytest, falls back to unittest
+./run-tests.sh -v        # extra args pass through (verbose)
 ```
+
+Or run a runner directly:
+
+```bash
+python3 -m pytest tests/ -v
+python3 -m unittest discover -s tests -v   # no extra dependency
+```
+
+Safe to run anytime, including on the deployment server — every test mocks HTTP and uses in-memory SQLite, so it never touches `settings.json`, the live database, or sends Telegram messages.
 
 175 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
