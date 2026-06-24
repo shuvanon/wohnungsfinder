@@ -9,8 +9,19 @@ Each scrape cycle:
 2. Finds listings not seen before
 3. Marks them as seen in a local SQLite database
 4. Runs each new listing through hard filters — blocked listings are dropped
-5. Scores remaining listings by your priority rules
-6. Sends a Telegram notification to all configured recipients
+5. **(optional)** For survivors, fetches the listing's own detail page and uses an LLM to extract fields the list view misses or gets wrong (e.g. a WBS requirement hidden in the headline or description), then re-applies the hard filters
+6. Scores remaining listings by your priority rules
+7. Sends a Telegram notification to all configured recipients
+
+The list view is shallow; each listing links out to the housing company's own
+site (degewo, howoge, gewobag, wbm, gesobau, …), where the real detail lives.
+Since every provider's page is structured differently, the optional enrichment
+step (5) hands the page text to an LLM to normalize it into structured fields
+rather than maintaining a parser per provider. Rule-based filtering stays
+primary — the LLM only fills fields; your config rules still decide. Enrichment
+runs **only on listings that pass the cheap filters first**, so it makes a
+handful of detail fetches per cycle, not hundreds. It is **off by default**;
+enable it in the `llm` config section (see below).
 
 On the **first run**, all current listings are silently saved as "seen" — no notifications are sent. From the second run onwards, only genuinely new listings trigger notifications.
 
@@ -29,7 +40,10 @@ wohnungsfinder/
 ├── scraper/
 │   ├── fetcher.py                 # HTTP fetching + Livewire pagination
 │   ├── parser.py                  # Livewire snapshots → listing dicts
+│   ├── detail_fetcher.py          # Fetch + clean a listing's detail page
 │   └── store.py                   # SQLite store (listings + filter audit log)
+├── enrich/
+│   └── llm.py                     # LLM extraction (OpenAI-compatible endpoint)
 ├── filters/
 │   ├── hard_filter.py             # Block unwanted listings
 │   └── priority.py                # Score and label remaining listings
@@ -46,8 +60,10 @@ wohnungsfinder/
     ├── test_parser.py             # 22 tests
     ├── test_hard_filter.py        # 17 tests
     ├── test_priority.py           # 18 tests
-    ├── test_store.py              # 22 tests
+    ├── test_store.py              # 24 tests
     ├── test_formatter.py          # 14 tests
+    ├── test_detail_fetcher.py     # 7 tests
+    ├── test_llm.py                # 15 tests
     └── test_telegram.py           # 29 tests
 ```
 
@@ -109,7 +125,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 132 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 156 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -229,6 +245,37 @@ Rule match types:
 | `log_file` | `logs/scraper.log` | Path to log file |
 | `log_level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
+### `llm` (optional detail-page enrichment)
+
+When enabled, each listing that passes the cheap hard filters has its **detail
+page** fetched and run through an LLM that extracts structured fields the list
+view misses (see **How it works**, step 5). The backend is any
+**OpenAI-compatible** `/v1/chat/completions` endpoint — a self-hosted server on
+your own machine, a local runtime like Ollama, or a cheap cloud API. Switching
+backends is a config change, not a code change.
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Master switch. When `false`, the pipeline runs on list-view data only (unchanged behaviour). |
+| `base_url` | `http://localhost:8000/v1` | Base URL of the OpenAI-compatible endpoint (no trailing `/chat/completions`). |
+| `model` | `gemma-2-2b-it` | Model name to request. |
+| `api_key_env` | `LLM_API_KEY` | Name of the **environment variable** holding the API key. Leave the variable unset for a local server that needs no key. |
+| `timeout` | `60` | Per-request timeout in seconds. |
+| `max_detail_chars` | `8000` | Cap on detail-page text sent to the model (bounds cost/latency). |
+
+The extractor returns these fields, which are stored on each listing and are
+also available as `field` values in `hard_filters` / `priority_scoring`:
+`wbs_required` (bool), `wbs_tier`, `heizkosten`, `deposit`, `energy_class`,
+`heating_type`, `pets_allowed`, `description_summary`. When the LLM finds a WBS
+requirement the list view missed, the listing's `wbs` is escalated to
+`"erforderlich"` so the existing WBS rule blocks it. The LLM never makes the
+pass/fail decision itself — it only fills fields; your rules still decide. If
+the endpoint is unreachable or returns bad output, enrichment degrades
+gracefully and the listing is processed on list-view data alone.
+
+The raw detail-page text and a `detail_fetched_at` timestamp are also stored,
+so extraction can be re-run after a prompt/model change without re-fetching.
+
 ## Viewing the data
 
 The SQLite database at `data/listings.db` contains two tables:
@@ -245,7 +292,7 @@ You can query it directly on the server with `sqlite3`, or copy it to your local
 python3 -m unittest discover -s tests -v
 ```
 
-132 tests covering parser, hard filter, priority scorer, store, formatter, and Telegram notifier.
+156 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
 ## Updating the code
 

@@ -32,7 +32,22 @@ from filters.priority    import PriorityResult
 logger = logging.getLogger(__name__)
 
 # Increment this when the schema changes. _migrate() handles upgrades.
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+
+# Columns added in schema v2 to hold LLM-extracted detail-page fields.
+# (column_name, SQL type) — applied via ALTER TABLE ADD COLUMN.
+_V2_COLUMNS = (
+    ("wbs_required",        "INTEGER"),
+    ("wbs_tier",            "TEXT"),
+    ("heizkosten",          "REAL"),
+    ("deposit",             "REAL"),
+    ("energy_class",        "TEXT"),
+    ("heating_type",        "TEXT"),
+    ("pets_allowed",        "INTEGER"),
+    ("description_summary", "TEXT"),
+    ("detail_text",         "TEXT"),
+    ("detail_fetched_at",   "TEXT"),
+)
 
 
 class ListingStore:
@@ -102,6 +117,49 @@ class ListingStore:
                 self._conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Failed to insert listing {listing.get('url')}: {e}")
+
+    def save_enrichment(self, listing: dict) -> None:
+        """
+        Persist LLM-extracted detail fields onto an already-inserted listing.
+
+        Called after the detail page has been fetched and the LLM has run, so
+        the enriched data is recorded even if the listing is later blocked.
+        Reads the v2 columns directly off the listing dict (missing keys → NULL)
+        and stamps detail_fetched_at.
+        """
+        try:
+            self._conn.execute(
+                """
+                UPDATE listings SET
+                    wbs_required        = :wbs_required,
+                    wbs_tier            = :wbs_tier,
+                    heizkosten          = :heizkosten,
+                    deposit             = :deposit,
+                    energy_class        = :energy_class,
+                    heating_type        = :heating_type,
+                    pets_allowed        = :pets_allowed,
+                    description_summary = :description_summary,
+                    detail_text         = :detail_text,
+                    detail_fetched_at   = :detail_fetched_at
+                WHERE url = :url
+                """,
+                {
+                    "url":                 listing["url"],
+                    "wbs_required":        listing.get("wbs_required"),
+                    "wbs_tier":            listing.get("wbs_tier"),
+                    "heizkosten":          listing.get("heizkosten"),
+                    "deposit":             listing.get("deposit"),
+                    "energy_class":        listing.get("energy_class"),
+                    "heating_type":        listing.get("heating_type"),
+                    "pets_allowed":        listing.get("pets_allowed"),
+                    "description_summary": listing.get("description_summary"),
+                    "detail_text":         listing.get("detail_text"),
+                    "detail_fetched_at":   _utcnow(),
+                },
+            )
+            self._conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to save enrichment for {listing.get('url')}: {e}")
 
     def log_filter_result(
         self,
@@ -218,6 +276,16 @@ class ListingStore:
             """)
             self._conn.commit()
             logger.info("Schema migration v1 complete")
+
+        if current < 2:
+            logger.info("Applying schema migration v2 — detail/LLM columns")
+            for name, sql_type in _V2_COLUMNS:
+                self._conn.execute(
+                    f"ALTER TABLE listings ADD COLUMN {name} {sql_type}"
+                )
+            self._conn.execute("PRAGMA user_version = 2")
+            self._conn.commit()
+            logger.info("Schema migration v2 complete")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

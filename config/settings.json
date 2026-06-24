@@ -45,6 +45,15 @@
         "medium": 25
     }
 },
+  "llm": {
+    "enabled": false,
+    "base_url": "http://localhost:8000/v1",
+    "model": "gemma-2-2b-it",
+    "api_key_env": "LLM_API_KEY",
+    "timeout": 60,
+    "max_detail_chars": 8000
+  },
+
   "scraper": {
     "url": "https://www.inberlinwohnen.de/wohnungsfinder",
     "interval_minutes": 12,

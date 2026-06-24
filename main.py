@@ -12,14 +12,16 @@ import sys
 import time
 from pathlib import Path
 
-from config.loader       import load_config
-from scraper.fetcher     import fetch_page
-from scraper.parser      import parse_listings
-from scraper.store       import ListingStore
-from filters.hard_filter import HardFilter
-from filters.priority    import PriorityScorer
-from notifier.telegram   import TelegramNotifier
-from notifier.formatter  import format_notification
+from config.loader         import load_config
+from scraper.fetcher       import fetch_page
+from scraper.parser        import parse_listings
+from scraper.detail_fetcher import fetch_detail_text
+from scraper.store         import ListingStore
+from filters.hard_filter   import HardFilter
+from filters.priority      import PriorityScorer
+from enrich.llm            import LLMExtractor
+from notifier.telegram     import TelegramNotifier
+from notifier.formatter    import format_notification
 
 BASE_DIR = Path(__file__).parent
 
@@ -40,12 +42,28 @@ def setup_logging(log_file: str, level: str) -> None:
 
 # ── Single scrape cycle ────────────────────────────────────────────────────────
 
+def _apply_enrichment(listing: dict, extracted: dict) -> None:
+    """
+    Merge LLM-extracted fields into the listing and reconcile derived fields.
+
+    The hard filter reads the textual `wbs` field, so when the LLM finds a WBS
+    requirement the list view missed (the key case: table says "nicht
+    erforderlich" but the headline/detail page says otherwise), escalate `wbs`
+    to "erforderlich" so the existing rule actually blocks it. We only escalate,
+    never downgrade — a list-view WBS flag is not cleared on the LLM's say-so.
+    """
+    listing.update(extracted)
+    if extracted.get("wbs_required") is True:
+        listing["wbs"] = "erforderlich"
+
+
 def run_cycle(
-    cfg:      dict,
-    store:    ListingStore,
-    hfilter:  HardFilter,
-    scorer:   PriorityScorer,
-    notifier: TelegramNotifier | None,
+    cfg:       dict,
+    store:     ListingStore,
+    hfilter:   HardFilter,
+    scorer:    PriorityScorer,
+    extractor: LLMExtractor,
+    notifier:  TelegramNotifier | None,
 ) -> None:
     logger = logging.getLogger(__name__)
     scraper_cfg = cfg["scraper"]
@@ -71,17 +89,40 @@ def run_cycle(
     store.mark_seen(new_listings)
     store.save()
 
-    # 4. Filter, score, notify
+    # 4. Filter, enrich, score, notify
     notified = blocked = 0
     for listing in new_listings:
 
-        # Hard filter
+        # Cheap hard filter on list-view data — drop obvious nos before
+        # spending any network / LLM budget on the detail page.
         filter_result = hfilter.check(listing)
         if not filter_result.passed:
             logger.info(f"  ⛔ BLOCKED ({filter_result.reason}): {listing.get('address', listing['url'])}")
             store.log_filter_result(listing, filter_result)
             blocked += 1
             continue
+
+        # Enrich survivors: fetch the detail page, normalize unstructured
+        # fields (e.g. true WBS requirement) via the LLM, then re-run the hard
+        # filter now that those fields may have changed.
+        if extractor.enabled:
+            detail_text = fetch_detail_text(
+                listing["url"], max_chars=extractor.max_detail_chars
+            )
+            extracted = extractor.extract(listing, detail_text)
+            listing["detail_text"] = detail_text
+            _apply_enrichment(listing, extracted)
+            store.save_enrichment(listing)
+
+            filter_result = hfilter.check(listing)
+            if not filter_result.passed:
+                logger.info(
+                    f"  ⛔ BLOCKED after enrichment ({filter_result.reason}): "
+                    f"{listing.get('address', listing['url'])}"
+                )
+                store.log_filter_result(listing, filter_result)
+                blocked += 1
+                continue
 
         # Priority score
         priority = scorer.score(listing)
@@ -116,9 +157,14 @@ def main() -> None:
     logger = logging.getLogger(__name__)
     logger.info("Wohnungsfinder scraper starting up")
 
-    store   = ListingStore(BASE_DIR / scraper_cfg["store_file"])
-    hfilter = HardFilter(cfg["hard_filters"])
-    scorer  = PriorityScorer(cfg["priority_scoring"])
+    store     = ListingStore(BASE_DIR / scraper_cfg["store_file"])
+    hfilter   = HardFilter(cfg["hard_filters"])
+    scorer    = PriorityScorer(cfg["priority_scoring"])
+    extractor = LLMExtractor(cfg.get("llm"))
+    if extractor.enabled:
+        logger.info(f"LLM enrichment ready ({extractor.model} @ {extractor.base_url})")
+    else:
+        logger.info("LLM enrichment disabled — running on list-view data only")
 
     # Set up Telegram (optional — falls back to stdout if not configured)
     notifier: TelegramNotifier | None = None
@@ -146,7 +192,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     while not shutdown:
-        run_cycle(cfg, store, hfilter, scorer, notifier)
+        run_cycle(cfg, store, hfilter, scorer, extractor, notifier)
         if shutdown:
             break
         sleep_secs = base_interval + random.randint(-jitter, jitter)

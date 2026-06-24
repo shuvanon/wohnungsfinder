@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data (auto-created; data/berlin_postcodes.json stays tracked)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+logs/*.log
+
+# Secrets / local config overrides
+.env
+
+# Claude Code local project state (per-user permission allowlist, etc.)
+.claude/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

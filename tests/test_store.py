@@ -204,7 +204,7 @@ class TestPersistence(unittest.TestCase):
     def test_schema_version_set(self):
         store = _make_store()
         version = store._conn.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 1)
+        self.assertEqual(version, 2)
 
     def test_wal_mode_enabled(self):
         store = _make_store()
@@ -220,6 +220,53 @@ class TestPersistence(unittest.TestCase):
             store = ListingStore(deep_path)
             self.assertTrue(deep_path.exists())
             store.close()
+
+
+# ── save_enrichment ─────────────────────────────────────────────────────────
+
+class TestSaveEnrichment(unittest.TestCase):
+
+    def test_enrichment_persisted(self):
+        store = _make_store()
+        listing = _listing("https://x.de/1")
+        store.mark_seen([listing])
+        enriched = {
+            **listing,
+            "wbs_required": True,
+            "wbs_tier": "WBS 140",
+            "heizkosten": 60.72,
+            "deposit": 1407.81,
+            "energy_class": "C",
+            "heating_type": "Fernwärme",
+            "pets_allowed": False,
+            "description_summary": "Helle Wohnung.",
+            "detail_text": "Kaltmiete ... WBS erforderlich ...",
+        }
+        store.save_enrichment(enriched)
+
+        row = store._conn.execute(
+            "SELECT wbs_required, wbs_tier, energy_class, heating_type, "
+            "deposit, detail_fetched_at FROM listings WHERE url = ?",
+            ("https://x.de/1",),
+        ).fetchone()
+        self.assertEqual(row["wbs_required"], 1)
+        self.assertEqual(row["wbs_tier"], "WBS 140")
+        self.assertEqual(row["energy_class"], "C")
+        self.assertEqual(row["heating_type"], "Fernwärme")
+        self.assertAlmostEqual(row["deposit"], 1407.81)
+        self.assertIsNotNone(row["detail_fetched_at"])
+
+    def test_missing_fields_default_null(self):
+        store = _make_store()
+        listing = _listing("https://x.de/2")
+        store.mark_seen([listing])
+        store.save_enrichment(listing)  # no enrichment keys present
+        row = store._conn.execute(
+            "SELECT energy_class, heizkosten FROM listings WHERE url = ?",
+            ("https://x.de/2",),
+        ).fetchone()
+        self.assertIsNone(row["energy_class"])
+        self.assertIsNone(row["heizkosten"])
 
 
 # ── len ───────────────────────────────────────────────────────────────────────
