@@ -32,7 +32,7 @@ from filters.priority    import PriorityResult
 logger = logging.getLogger(__name__)
 
 # Increment this when the schema changes. _migrate() handles upgrades.
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 # Columns added in schema v2 to hold LLM-extracted detail-page fields.
 # (column_name, SQL type) — applied via ALTER TABLE ADD COLUMN.
@@ -88,6 +88,39 @@ class ListingStore:
             )
         }
         return [l for l in listings if l["url"] not in seen]
+
+    def get_pending(self, limit: int) -> list[dict]:
+        """
+        Return up to `limit` listings awaiting processing (processed_at IS NULL),
+        oldest-first, as listing dicts. This is the enrichment work queue —
+        bursts accumulate here and drain across cycles.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM listings WHERE processed_at IS NULL "
+            "ORDER BY seen_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_row_to_listing(row) for row in rows]
+
+    def count_pending(self) -> int:
+        """Number of listings still awaiting processing."""
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE processed_at IS NULL"
+        ).fetchone()[0]
+
+    def mark_processed(self, url: str) -> None:
+        """
+        Mark a listing as handled by the pipeline (enriched/filtered/notified),
+        removing it from the pending queue. Idempotent.
+        """
+        try:
+            self._conn.execute(
+                "UPDATE listings SET processed_at = ? WHERE url = ?",
+                (_utcnow(), url),
+            )
+            self._conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to mark processed {url}: {e}")
 
     def mark_seen(self, listings: list[dict]) -> None:
         """
@@ -302,8 +335,40 @@ class ListingStore:
             self._conn.commit()
             logger.info("Schema migration v2 complete")
 
+        if current < 3:
+            logger.info("Applying schema migration v3 — enrichment work queue")
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(listings)")}
+            if "processed_at" not in cols:
+                self._conn.execute("ALTER TABLE listings ADD COLUMN processed_at TEXT")
+            # Backfill: every listing that already exists predates the queue, so
+            # mark it processed (using its seen_at) — otherwise enabling the queue
+            # on an existing database would treat the entire backlog as pending
+            # and re-notify it. New inserts get NULL processed_at = pending.
+            self._conn.execute(
+                "UPDATE listings SET processed_at = seen_at WHERE processed_at IS NULL"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_processed_at "
+                "ON listings(processed_at)"
+            )
+            self._conn.execute("PRAGMA user_version = 3")
+            self._conn.commit()
+            logger.info("Schema migration v3 complete")
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _row_to_listing(row: sqlite3.Row) -> dict:
+    """Convert a listings row to a listing dict, deserializing features JSON."""
+    d = dict(row)
+    feats = d.get("features")
+    if isinstance(feats, str):
+        try:
+            d["features"] = json.loads(feats)
+        except json.JSONDecodeError:
+            d["features"] = []
+    return d
+
 
 def _utcnow() -> str:
     """Return current UTC time as an ISO 8601 string."""

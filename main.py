@@ -54,6 +54,42 @@ def _apply_enrichment(listing: dict, extracted: dict) -> None:
     listing.update(extracted)
 
 
+def _finalize(
+    listing:  dict,
+    hfilter:  HardFilter,
+    scorer:   PriorityScorer,
+    notifier: TelegramNotifier | None,
+    store:    ListingStore,
+) -> str:
+    """
+    Run the authoritative hard filter, then score + notify if it passes.
+    Logs the audit row either way. Returns "notified" or "blocked".
+    """
+    logger = logging.getLogger(__name__)
+
+    filter_result = hfilter.check(listing)
+    if not filter_result.passed:
+        logger.info(f"  ⛔ BLOCKED ({filter_result.reason}): {listing.get('address', listing['url'])}")
+        store.log_filter_result(listing, filter_result)
+        return "blocked"
+
+    priority = scorer.score(listing)
+    logger.info(
+        f"  ✅ NEW {priority.label} (score {priority.score}): "
+        f"{listing.get('address', listing['url'])}"
+    )
+    store.log_filter_result(listing, filter_result, priority)
+
+    message = format_notification(listing, priority)
+    if notifier:
+        notifier.send(message)
+    else:
+        # No Telegram configured — print to stdout (useful for local testing)
+        print("\n" + "═" * 60)
+        print(message)
+    return "notified"
+
+
 def run_cycle(
     cfg:       dict,
     store:     ListingStore,
@@ -78,70 +114,72 @@ def run_cycle(
         logger.warning("Parser returned 0 listings — page structure may have changed")
         return
 
-    # 3. Find new listings
+    # 3. Discover new listings and mark them seen immediately (so a crash never
+    #    re-notifies). New rows enter the queue as pending (processed_at NULL).
     new_listings = store.find_new(listings)
     logger.info(f"Found {len(new_listings)} new out of {len(listings)} total listings")
-
-    # Mark all as seen immediately so a crash mid-loop doesn't re-notify
     store.mark_seen(new_listings)
-    store.save()
 
-    # 4. Filter, enrich, score, notify
-    notified = blocked = 0
-    for listing in new_listings:
-
-        # Cheap hard filter on list-view data — drop obvious nos before
-        # spending any network / LLM budget on the detail page.
-        filter_result = hfilter.check(listing)
-        if not filter_result.passed:
-            logger.info(f"  ⛔ BLOCKED ({filter_result.reason}): {listing.get('address', listing['url'])}")
-            store.log_filter_result(listing, filter_result)
-            blocked += 1
-            continue
-
-        # Enrich survivors: fetch the detail page, normalize unstructured
-        # fields (e.g. true WBS requirement) via the LLM, then re-run the hard
-        # filter now that those fields may have changed.
-        if extractor.enabled:
-            detail_text = fetch_detail_text(
-                listing["url"], max_chars=extractor.max_detail_chars
-            )
-            extracted = extractor.extract(listing, detail_text)
-            listing["detail_text"] = detail_text
-            _apply_enrichment(listing, extracted)
-            store.save_enrichment(listing)
-
-            filter_result = hfilter.check(listing)
-            if not filter_result.passed:
-                logger.info(
-                    f"  ⛔ BLOCKED after enrichment ({filter_result.reason}): "
-                    f"{listing.get('address', listing['url'])}"
-                )
-                store.log_filter_result(listing, filter_result)
+    # 4a. No enrichment → process every new listing immediately, as before.
+    if not extractor.enabled:
+        notified = blocked = 0
+        for listing in new_listings:
+            if _finalize(listing, hfilter, scorer, notifier, store) == "notified":
+                notified += 1
+            else:
                 blocked += 1
-                continue
+            store.mark_processed(listing["url"])
+        logger.info(f"Cycle complete — {notified} notified, {blocked} blocked")
+        return
 
-        # Priority score
-        priority = scorer.score(listing)
-        logger.info(
-            f"  ✅ NEW {priority.label} (score {priority.score}): "
-            f"{listing.get('address', listing['url'])}"
-        )
-        store.log_filter_result(listing, filter_result, priority)
+    # 4b. Enrichment on. The detail page is authoritative and the local LLM is a
+    #     single stream, so we decouple discovery from a bounded drain: discover
+    #     fast, then enrich a budgeted slice of the pending queue. Bursts drain
+    #     across cycles; idle stretches let the queue catch up.
+    llm_cfg       = cfg.get("llm", {})
+    scope         = llm_cfg.get("enrich_scope", "survivors")
+    max_per_cycle = llm_cfg.get("max_enrich_per_cycle", 15)
+    max_seconds   = llm_cfg.get("max_enrich_seconds", 480)
 
-        # Format & send
-        message = format_notification(listing, priority)
+    # In "survivors" mode, apply the cheap filter to list data at discovery so
+    # obvious nos never consume detail-fetch / LLM budget. In "all" mode, every
+    # new listing is enriched and the detail page decides.
+    cheap_blocked = 0
+    if scope == "survivors":
+        for listing in new_listings:
+            result = hfilter.check(listing)
+            if not result.passed:
+                logger.info(f"  ⛔ BLOCKED ({result.reason}): {listing.get('address', listing['url'])}")
+                store.log_filter_result(listing, result)
+                store.mark_processed(listing["url"])
+                cheap_blocked += 1
 
-        if notifier:
-            notifier.send(message)
+    # Drain the pending queue under the per-cycle budget.
+    pending = store.get_pending(max_per_cycle)
+    notified = blocked = 0
+    start = time.monotonic()
+    for listing in pending:
+        if max_seconds and (time.monotonic() - start) > max_seconds:
+            logger.info("Enrichment time budget reached — remaining listings stay pending")
+            break
+
+        detail_text = fetch_detail_text(listing["url"], max_chars=extractor.max_detail_chars)
+        extracted = extractor.extract(listing, detail_text)
+        listing["detail_text"] = detail_text
+        _apply_enrichment(listing, extracted)
+        store.save_enrichment(listing)
+
+        if _finalize(listing, hfilter, scorer, notifier, store) == "notified":
+            notified += 1
         else:
-            # No Telegram configured — print to stdout (useful for local testing)
-            print("\n" + "═" * 60)
-            print(message)
+            blocked += 1
+        store.mark_processed(listing["url"])
 
-        notified += 1
-
-    logger.info(f"Cycle complete — {notified} notified, {blocked} blocked")
+    remaining = store.count_pending()
+    logger.info(
+        f"Cycle complete — {notified} notified, {blocked + cheap_blocked} blocked, "
+        f"{remaining} pending"
+    )
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────

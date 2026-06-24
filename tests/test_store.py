@@ -204,7 +204,7 @@ class TestPersistence(unittest.TestCase):
     def test_schema_version_set(self):
         store = _make_store()
         version = store._conn.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
 
     def test_wal_mode_enabled(self):
         store = _make_store()
@@ -272,6 +272,50 @@ class TestSaveEnrichment(unittest.TestCase):
         ).fetchone()
         self.assertIsNone(row["energy_class"])
         self.assertIsNone(row["heizkosten"])
+
+
+# ── pending work queue ──────────────────────────────────────────────────────
+
+class TestQueue(unittest.TestCase):
+
+    def test_new_listings_are_pending(self):
+        store = _make_store()
+        store.mark_seen([_listing(f"https://x.de/{i}") for i in range(3)])
+        self.assertEqual(store.count_pending(), 3)
+        self.assertEqual(len(store.get_pending(10)), 3)
+
+    def test_get_pending_respects_limit(self):
+        store = _make_store()
+        store.mark_seen([_listing(f"https://x.de/{i}") for i in range(5)])
+        self.assertEqual(len(store.get_pending(2)), 2)
+
+    def test_mark_processed_removes_from_pending(self):
+        store = _make_store()
+        store.mark_seen([_listing("https://x.de/a"), _listing("https://x.de/b")])
+        store.mark_processed("https://x.de/a")
+        self.assertEqual(store.count_pending(), 1)
+        pending_urls = {l["url"] for l in store.get_pending(10)}
+        self.assertEqual(pending_urls, {"https://x.de/b"})
+
+    def test_pending_features_deserialized(self):
+        store = _make_store()
+        store.mark_seen([_listing("https://x.de/1")])  # GOOD_LISTING has a features list
+        listing = store.get_pending(10)[0]
+        self.assertIsInstance(listing["features"], list)
+        self.assertIn("Balkon", listing["features"])
+
+    def test_v2_to_v3_backfills_existing_as_processed(self):
+        """Upgrading a populated DB must not re-queue the whole backlog."""
+        store = _make_store()
+        store.mark_seen([_listing("https://x.de/old")])
+        # Simulate a v2 database that has just gained the processed_at column:
+        # version rolled back and every row still NULL (pre-queue).
+        store._conn.execute("PRAGMA user_version = 2")
+        store._conn.execute("UPDATE listings SET processed_at = NULL")
+        store._conn.commit()
+        store._migrate()
+        self.assertEqual(store._conn.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertEqual(store.count_pending(), 0)
 
 
 # ── len ───────────────────────────────────────────────────────────────────────

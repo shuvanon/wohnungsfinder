@@ -22,10 +22,18 @@ every provider's page is structured differently, the optional enrichment step
 than maintaining a parser per provider. **The detail page wins:** every field
 the LLM extracts overwrites the list value; the list value is kept only where
 the page doesn't yield that field. The LLM only fills fields — your config
-rules still decide pass/fail, now on the corrected datasheet. Enrichment runs
-**only on listings that pass the cheap filters first**, so it makes a handful of
-detail fetches per cycle, not hundreds. It is **off by default**; enable it in
-the `llm` config section (see below).
+rules still decide pass/fail, now on the corrected datasheet.
+
+Because a self-hosted LLM is a single stream and new listings arrive in bursts
+(0 for an hour, then 30 at once), discovery and enrichment are decoupled: each
+cycle marks all new listings seen, then drains a **budgeted slice** of the
+pending queue (`max_enrich_per_cycle` / `max_enrich_seconds`). Bursts drain
+across cycles; idle stretches let the queue catch up; a crash mid-drain just
+leaves listings pending for the next cycle. The `enrich_scope` setting controls
+how much gets enriched: `"survivors"` (default) runs the cheap filters on list
+data first so obvious nos never cost a detail fetch; `"all"` enriches every new
+listing and lets the (often-wrong) list data decide nothing. Enrichment is
+**off by default**; enable it in the `llm` config section (see below).
 
 On the **first run**, all current listings are silently saved as "seen" — no notifications are sent. From the second run onwards, only genuinely new listings trigger notifications.
 
@@ -64,7 +72,7 @@ wohnungsfinder/
     ├── test_parser.py             # 22 tests
     ├── test_hard_filter.py        # 17 tests
     ├── test_priority.py           # 18 tests
-    ├── test_store.py              # 24 tests
+    ├── test_store.py              # 29 tests
     ├── test_formatter.py          # 14 tests
     ├── test_detail_fetcher.py     # 7 tests
     ├── test_llm.py                # 24 tests
@@ -129,7 +137,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 165 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 170 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -266,6 +274,9 @@ backends is a config change, not a code change.
 | `api_key_env` | `LLM_API_KEY` | Name of the **environment variable** holding the API key. Leave the variable unset for a local server that needs no key. |
 | `timeout` | `60` | Per-request timeout in seconds. |
 | `max_detail_chars` | `8000` | Cap on detail-page text sent to the model (bounds cost/latency). |
+| `enrich_scope` | `survivors` | `survivors` = cheap-filter on list data first, only enrich passers; `all` = enrich every new listing (detail page is the sole authority). |
+| `max_enrich_per_cycle` | `15` | Max listings enriched per cycle. Leftovers stay pending and drain next cycle. |
+| `max_enrich_seconds` | `480` | Wall-clock cap on the enrichment phase per cycle (`0` = no cap). Keeps a burst from overrunning the scrape interval. |
 
 The extractor re-reads the **whole datasheet** from the detail page and those
 values overwrite the list data. It returns:
@@ -291,7 +302,7 @@ so extraction can be re-run after a prompt/model change without re-fetching.
 
 The SQLite database at `data/listings.db` contains two tables:
 
-**`listings`** — every apartment ever seen, with all parsed fields.
+**`listings`** — every apartment ever seen, with all parsed (and, when enrichment is on, detail-corrected) fields. `detail_fetched_at` shows when the detail page was enriched; `processed_at IS NULL` marks listings still queued for enrichment.
 
 **`filter_results`** — one row per new listing per cycle, recording whether it passed filters, why it was blocked, its priority label, score, and score breakdown.
 
@@ -303,7 +314,7 @@ You can query it directly on the server with `sqlite3`, or copy it to your local
 python3 -m unittest discover -s tests -v
 ```
 
-165 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
+170 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
 ## Updating the code
 

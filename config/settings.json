@@ -51,7 +51,10 @@
     "model": "gemma-2-2b-it",
     "api_key_env": "LLM_API_KEY",
     "timeout": 60,
-    "max_detail_chars": 8000
+    "max_detail_chars": 8000,
+    "enrich_scope": "survivors",
+    "max_enrich_per_cycle": 15,
+    "max_enrich_seconds": 480
   },
 
   "scraper": {
