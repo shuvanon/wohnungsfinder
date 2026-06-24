@@ -1,13 +1,15 @@
 """
 enrich/llm.py — LLM extraction layer.
 
-The LLM here is a narrow *normalizer*, not a judge. Its only job is to recover
-the unstructured signals the list view misses or gets wrong — most importantly
-the true WBS requirement, which can be stated in the headline or detail-page
-body even when the structured list table says "nicht erforderlich".
+The detail page is the source of truth. The list view is often partially or
+totally wrong (e.g. a total rent shown as 600 € that is really 1100 €, or a
+WBS requirement the table hides). So when we open the detail page, the LLM
+re-extracts the *whole datasheet* from it and those values overwrite the list
+values; the list value is only kept for fields the LLM cannot determine.
 
-The structured fields it returns feed the existing rule-based hard filter and
-priority scorer. No LLM decisions are made about pass/fail.
+The LLM is still a normalizer, not a judge — it only fills fields. The
+rule-based hard filter and priority scorer then decide pass/fail on the
+corrected datasheet.
 
 Backend is any OpenAI-compatible chat endpoint (a self-hosted server, Ollama,
 or a cheap cloud API) — configured entirely via the `llm` section of
@@ -25,18 +27,40 @@ import re
 
 import requests
 
+from scraper.parser import _parse_german_float
+
 logger = logging.getLogger(__name__)
 
-# Fields the model is asked to return. Anything it can't determine must be null.
+# The detail page is authoritative for these. Fields are grouped by the
+# coercion applied to the model's raw output; anything the model can't
+# determine must be null and is dropped (so the list value is kept on merge).
+_NUMBER_FIELDS = (
+    "total_rent",   # number — Warmmiete / Gesamtmiete in €
+    "cold_rent",    # number — Nettokaltmiete in €
+    "rooms",        # number — number of rooms
+    "size_m2",      # number — living area in m²
+    "heizkosten",   # number — monthly heating cost in €
+    "deposit",      # number — Kaution in €
+)
+_INT_FIELDS = (
+    "year_built",   # int    — year of construction
+)
+_BOOL_FIELDS = (
+    "pets_allowed",  # bool   — pets permitted
+)
+_LIST_FIELDS = (
+    "features",     # list   — short German feature names (Balkon, Aufzug, …)
+)
+_TEXT_FIELDS = (
+    "wbs",          # string — "erforderlich" or "nicht erforderlich"
+    "wbs_tier",     # string — e.g. "WBS 140", "140%-220%"
+    "available",    # string — availability date / text (Bezugsfrei ab)
+    "energy_class",  # string — energy efficiency class A–H
+    "heating_type",  # string — e.g. "Fernwärme", "Gas", "Erdwärme"
+    "description_summary",  # string — one-sentence summary
+)
 _SCHEMA_FIELDS = (
-    "wbs_required",        # bool   — true if a Wohnberechtigungsschein is needed
-    "wbs_tier",           # string — e.g. "WBS 140", "140%-220%", or null
-    "heizkosten",         # number — monthly heating cost in €, or null
-    "deposit",            # number — Kaution in €, or null
-    "energy_class",       # string — energy efficiency class A–H, or null
-    "heating_type",       # string — e.g. "Fernwärme", "Gas", "Erdwärme", or null
-    "pets_allowed",       # bool   — pets permitted, or null
-    "description_summary",  # string — one-sentence summary, or null
+    _NUMBER_FIELDS + _INT_FIELDS + _BOOL_FIELDS + _LIST_FIELDS + _TEXT_FIELDS
 )
 
 _SYSTEM_PROMPT = (
@@ -44,11 +68,17 @@ _SYSTEM_PROMPT = (
     "You are given a listing title and the visible text of its detail page. "
     "Return ONLY a JSON object with exactly these keys: "
     + ", ".join(_SCHEMA_FIELDS) + ". "
-    "Use null for any value you cannot determine from the provided text — never guess. "
-    "For wbs_required: return true if the listing requires a Wohnberechtigungsschein "
-    "(look for 'WBS', 'Wohnberechtigungsschein', 'WBS erforderlich', income-limit / "
-    "'einkommensorientierte Vermietung' wording), false if it explicitly does not, "
-    "null if unclear. heizkosten and deposit are numbers in euros (no currency symbol). "
+    "Base every value on the detail page text, not the title. "
+    "Use null for any value you cannot determine from the text — never guess. "
+    "Numbers (total_rent, cold_rent, rooms, size_m2, heizkosten, deposit, "
+    "year_built) must be plain JSON numbers, with no currency symbol and no "
+    "thousands separators (e.g. 1100.5, not \"1.100,50 €\"). "
+    "total_rent is the Warmmiete/Gesamtmiete; cold_rent is the Nettokaltmiete. "
+    "wbs is \"erforderlich\" if a Wohnberechtigungsschein is required (look for "
+    "'WBS', 'Wohnberechtigungsschein', income-limit / 'einkommensorientierte "
+    "Vermietung' wording), otherwise \"nicht erforderlich\". "
+    "features is a JSON array of short German feature names (e.g. Balkon, "
+    "Aufzug, Einbauküche, Keller). "
     "Respond with the JSON object and nothing else."
 )
 
@@ -108,8 +138,16 @@ class LLMExtractor:
             logger.warning(f"LLM returned unparseable JSON for {listing.get('url')}")
             return {}
 
-        # Keep only known keys with non-null values.
-        return {k: data[k] for k in _SCHEMA_FIELDS if data.get(k) is not None}
+        # Coerce each known field; drop anything that comes back null/unusable
+        # so the caller's dict.update() keeps the list value for that field.
+        result = {}
+        for field in _SCHEMA_FIELDS:
+            if data.get(field) is None:
+                continue
+            coerced = _coerce(field, data[field])
+            if coerced is not None:
+                result[field] = coerced
+        return result
 
     # ── Internals ────────────────────────────────────────────────────────────
 
@@ -138,6 +176,64 @@ class LLMExtractor:
         resp.raise_for_status()
         body = resp.json()
         return body["choices"][0]["message"]["content"]
+
+
+def _coerce(field: str, value):
+    """
+    Normalize one raw model value into the type the datasheet expects.
+    Returns None when the value can't be used (so the list value is kept).
+    """
+    if field in _NUMBER_FIELDS:
+        return _to_number(value)
+
+    if field in _INT_FIELDS:
+        num = _to_number(value)
+        return int(num) if num is not None else None
+
+    if field in _BOOL_FIELDS:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "yes", "ja", "1")
+        return None
+
+    if field in _LIST_FIELDS:
+        if isinstance(value, list):
+            items = [str(x).strip() for x in value if str(x).strip()]
+            return items or None
+        return None
+
+    if field == "wbs":
+        return _normalize_wbs(value)
+
+    # Remaining text fields.
+    text = str(value).strip()
+    return text or None
+
+
+def _to_number(value):
+    """Coerce a JSON number or German-formatted numeric string to float."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        return _parse_german_float(value)
+    return None
+
+
+def _normalize_wbs(value) -> str | None:
+    """Map a free-form WBS string to the canonical filter values."""
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    if any(neg in s for neg in ("nicht", "kein", "ohne", "no ", "not ")):
+        return "nicht erforderlich"
+    if "erforderlich" in s or "wbs" in s or "berechtigung" in s or s in ("true", "ja", "yes"):
+        return "erforderlich"
+    return None
 
 
 def _parse_json_object(raw: str):

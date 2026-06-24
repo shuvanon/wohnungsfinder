@@ -120,18 +120,26 @@ class ListingStore:
 
     def save_enrichment(self, listing: dict) -> None:
         """
-        Persist LLM-extracted detail fields onto an already-inserted listing.
+        Persist the (detail-corrected) datasheet onto an already-inserted listing.
 
-        Called after the detail page has been fetched and the LLM has run, so
-        the enriched data is recorded even if the listing is later blocked.
-        Reads the v2 columns directly off the listing dict (missing keys → NULL)
-        and stamps detail_fetched_at.
+        Called after the detail page has been fetched, the LLM has run, and the
+        detail-wins merge has updated the listing dict — so the stored row
+        reflects the authoritative detail-page values, plus the extra detail
+        fields and the raw detail_text. Recorded even if the listing is later
+        blocked. Stamps detail_fetched_at.
         """
         try:
             self._conn.execute(
                 """
                 UPDATE listings SET
-                    wbs_required        = :wbs_required,
+                    rooms               = :rooms,
+                    size_m2             = :size_m2,
+                    cold_rent           = :cold_rent,
+                    total_rent          = :total_rent,
+                    wbs                 = :wbs,
+                    available           = :available,
+                    year_built          = :year_built,
+                    features            = :features,
                     wbs_tier            = :wbs_tier,
                     heizkosten          = :heizkosten,
                     deposit             = :deposit,
@@ -145,7 +153,14 @@ class ListingStore:
                 """,
                 {
                     "url":                 listing["url"],
-                    "wbs_required":        listing.get("wbs_required"),
+                    "rooms":               listing.get("rooms"),
+                    "size_m2":             listing.get("size_m2"),
+                    "cold_rent":           listing.get("cold_rent"),
+                    "total_rent":          listing.get("total_rent"),
+                    "wbs":                 listing.get("wbs"),
+                    "available":           listing.get("available"),
+                    "year_built":          listing.get("year_built"),
+                    "features":            json.dumps(listing.get("features", [])),
                     "wbs_tier":            listing.get("wbs_tier"),
                     "heizkosten":          listing.get("heizkosten"),
                     "deposit":             listing.get("deposit"),

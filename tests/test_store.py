@@ -230,9 +230,12 @@ class TestSaveEnrichment(unittest.TestCase):
         store = _make_store()
         listing = _listing("https://x.de/1")
         store.mark_seen([listing])
+        # Detail-wins: the merged listing carries corrected datasheet values.
         enriched = {
             **listing,
-            "wbs_required": True,
+            "total_rent": 1100.0,        # list said 574.39; detail corrects it
+            "wbs": "erforderlich",       # list said "nicht erforderlich"
+            "features": ["Balkon", "Aufzug"],
             "wbs_tier": "WBS 140",
             "heizkosten": 60.72,
             "deposit": 1407.81,
@@ -245,11 +248,13 @@ class TestSaveEnrichment(unittest.TestCase):
         store.save_enrichment(enriched)
 
         row = store._conn.execute(
-            "SELECT wbs_required, wbs_tier, energy_class, heating_type, "
-            "deposit, detail_fetched_at FROM listings WHERE url = ?",
+            "SELECT total_rent, wbs, features, wbs_tier, energy_class, "
+            "heating_type, deposit, detail_fetched_at FROM listings WHERE url = ?",
             ("https://x.de/1",),
         ).fetchone()
-        self.assertEqual(row["wbs_required"], 1)
+        self.assertAlmostEqual(row["total_rent"], 1100.0)
+        self.assertEqual(row["wbs"], "erforderlich")
+        self.assertEqual(json.loads(row["features"]), ["Balkon", "Aufzug"])
         self.assertEqual(row["wbs_tier"], "WBS 140")
         self.assertEqual(row["energy_class"], "C")
         self.assertEqual(row["heating_type"], "Fernwärme")

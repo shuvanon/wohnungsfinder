@@ -9,19 +9,23 @@ Each scrape cycle:
 2. Finds listings not seen before
 3. Marks them as seen in a local SQLite database
 4. Runs each new listing through hard filters — blocked listings are dropped
-5. **(optional)** For survivors, fetches the listing's own detail page and uses an LLM to extract fields the list view misses or gets wrong (e.g. a WBS requirement hidden in the headline or description), then re-applies the hard filters
+5. **(optional)** For survivors, fetches the listing's own detail page and uses an LLM to re-extract the **whole datasheet** from it; those values overwrite the list data (the detail page is authoritative), then re-applies the hard filters
 6. Scores remaining listings by your priority rules
 7. Sends a Telegram notification to all configured recipients
 
-The list view is shallow; each listing links out to the housing company's own
-site (degewo, howoge, gewobag, wbm, gesobau, …), where the real detail lives.
-Since every provider's page is structured differently, the optional enrichment
-step (5) hands the page text to an LLM to normalize it into structured fields
-rather than maintaining a parser per provider. Rule-based filtering stays
-primary — the LLM only fills fields; your config rules still decide. Enrichment
-runs **only on listings that pass the cheap filters first**, so it makes a
-handful of detail fetches per cycle, not hundreds. It is **off by default**;
-enable it in the `llm` config section (see below).
+The list view is shallow and **frequently wrong** — a total rent shown as 600 €
+can really be 1100 € on the listing's own page, and a WBS requirement is often
+hidden there too. Each listing links out to the housing company's own site
+(degewo, howoge, gewobag, wbm, gesobau, …), where the real detail lives. Since
+every provider's page is structured differently, the optional enrichment step
+(5) hands the page text to an LLM to normalize it into structured fields rather
+than maintaining a parser per provider. **The detail page wins:** every field
+the LLM extracts overwrites the list value; the list value is kept only where
+the page doesn't yield that field. The LLM only fills fields — your config
+rules still decide pass/fail, now on the corrected datasheet. Enrichment runs
+**only on listings that pass the cheap filters first**, so it makes a handful of
+detail fetches per cycle, not hundreds. It is **off by default**; enable it in
+the `llm` config section (see below).
 
 On the **first run**, all current listings are silently saved as "seen" — no notifications are sent. From the second run onwards, only genuinely new listings trigger notifications.
 
@@ -63,7 +67,7 @@ wohnungsfinder/
     ├── test_store.py              # 24 tests
     ├── test_formatter.py          # 14 tests
     ├── test_detail_fetcher.py     # 7 tests
-    ├── test_llm.py                # 15 tests
+    ├── test_llm.py                # 24 tests
     └── test_telegram.py           # 29 tests
 ```
 
@@ -125,7 +129,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 156 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 165 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -263,15 +267,22 @@ backends is a config change, not a code change.
 | `timeout` | `60` | Per-request timeout in seconds. |
 | `max_detail_chars` | `8000` | Cap on detail-page text sent to the model (bounds cost/latency). |
 
-The extractor returns these fields, which are stored on each listing and are
-also available as `field` values in `hard_filters` / `priority_scoring`:
-`wbs_required` (bool), `wbs_tier`, `heizkosten`, `deposit`, `energy_class`,
-`heating_type`, `pets_allowed`, `description_summary`. When the LLM finds a WBS
-requirement the list view missed, the listing's `wbs` is escalated to
-`"erforderlich"` so the existing WBS rule blocks it. The LLM never makes the
-pass/fail decision itself — it only fills fields; your rules still decide. If
-the endpoint is unreachable or returns bad output, enrichment degrades
-gracefully and the listing is processed on list-view data alone.
+The extractor re-reads the **whole datasheet** from the detail page and those
+values overwrite the list data. It returns:
+
+- **Datasheet fields** (overwrite the list value): `total_rent`, `cold_rent`,
+  `rooms`, `size_m2`, `wbs`, `year_built`, `available`, `features`.
+- **Detail-only fields** (not in the list view): `wbs_tier`, `heizkosten`,
+  `deposit`, `energy_class`, `heating_type`, `pets_allowed`,
+  `description_summary`.
+
+All are stored on the listing and usable as `field` values in `hard_filters` /
+`priority_scoring`. The merge is **detail-wins**: each field the LLM returns
+overwrites the list value; a field the page doesn't yield keeps the list value.
+The LLM never makes the pass/fail decision itself — it only fills fields; your
+rules still decide, now on the corrected datasheet. If the endpoint is
+unreachable or returns bad output, enrichment degrades gracefully and the
+listing is processed on list-view data alone.
 
 The raw detail-page text and a `detail_fetched_at` timestamp are also stored,
 so extraction can be re-run after a prompt/model change without re-fetching.
@@ -292,7 +303,7 @@ You can query it directly on the server with `sqlite3`, or copy it to your local
 python3 -m unittest discover -s tests -v
 ```
 
-156 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
+165 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
 ## Updating the code
 

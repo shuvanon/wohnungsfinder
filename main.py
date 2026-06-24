@@ -44,17 +44,14 @@ def setup_logging(log_file: str, level: str) -> None:
 
 def _apply_enrichment(listing: dict, extracted: dict) -> None:
     """
-    Merge LLM-extracted fields into the listing and reconcile derived fields.
+    Overwrite the listing's datasheet with detail-page values (detail wins).
 
-    The hard filter reads the textual `wbs` field, so when the LLM finds a WBS
-    requirement the list view missed (the key case: table says "nicht
-    erforderlich" but the headline/detail page says otherwise), escalate `wbs`
-    to "erforderlich" so the existing rule actually blocks it. We only escalate,
-    never downgrade — a list-view WBS flag is not cleared on the LLM's say-so.
+    The list view is often partially or totally wrong, so each field the LLM
+    extracted from the detail page replaces the list value. `extract()` only
+    returns fields it could determine, so dict.update() keeps the list value
+    for anything the detail page didn't yield.
     """
     listing.update(extracted)
-    if extracted.get("wbs_required") is True:
-        listing["wbs"] = "erforderlich"
 
 
 def run_cycle(
