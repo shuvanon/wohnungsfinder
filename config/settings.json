@@ -1,6 +1,6 @@
 {
   "telegram": {
-    "bot_token": "***REMOVED***",
+    "bot_token": "YOUR_BOT_TOKEN",
     "chat_ids": [
       "YOUR_CHAT_ID_HERE"
     ]
@@ -46,7 +46,7 @@
 },
   "llm": {
     "enabled": false,
-    "base_url": "http://localhost:8000/v1",
+    "base_url": "http://base_url:8000/v1",
     "model": "gemma-2-2b-it",
     "api_key_env": "LLM_API_KEY",
     "timeout": 60,
