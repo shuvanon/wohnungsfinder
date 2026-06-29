@@ -20,6 +20,10 @@ logs/*.log
 # Secrets / local config overrides
 .env
 
+# Real config holds the Telegram bot token and per-machine values — keep it
+# local. config/settings.json.example is the tracked template.
+config/settings.json
+
 # Claude Code local project state (per-user permission allowlist, etc.)
 .claude/
 

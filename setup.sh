@@ -59,15 +59,24 @@ info "Runtime directories ready"
 
 # ── 4. Validate config ────────────────────────────────────────────────────────
 CONFIG="$PROJECT_DIR/config/settings.json"
+EXAMPLE="$PROJECT_DIR/config/settings.json.example"
 
+# settings.json is gitignored (it holds the real Telegram token + per-machine
+# values). On a fresh checkout it won't exist — seed it from the template.
 if [[ ! -f "$CONFIG" ]]; then
-    error "config/settings.json not found. It should have been included in the project."
+    if [[ -f "$EXAMPLE" ]]; then
+        cp "$EXAMPLE" "$CONFIG"
+        warning "Created config/settings.json from the template."
+        warning "Edit it with your Telegram bot_token and chat_ids. See README.md."
+    else
+        error "Neither config/settings.json nor config/settings.json.example found."
+    fi
 fi
 
 BOT_TOKEN=$(python3 -c "import json; c=json.load(open('$CONFIG')); print(c['telegram']['bot_token'])")
-CHAT_ID=$(python3 -c "import json; c=json.load(open('$CONFIG')); print(c['telegram']['chat_id'])")
+CHAT_IDS=$(python3 -c "import json; c=json.load(open('$CONFIG')); print(','.join(c['telegram'].get('chat_ids', [])))")
 
-if [[ "$BOT_TOKEN" == "YOUR_BOT_TOKEN_HERE" ]]; then
+if [[ "$BOT_TOKEN" == YOUR_BOT_TOKEN* ]]; then
     warning "Telegram bot_token is not configured in config/settings.json"
     warning "The scraper will print notifications to stdout instead of Telegram."
     warning "Edit config/settings.json when ready. See README.md for instructions."
@@ -75,8 +84,8 @@ else
     info "Telegram bot_token is configured"
 fi
 
-if [[ "$CHAT_ID" == "YOUR_CHAT_ID_HERE" ]]; then
-    warning "Telegram chat_id is not configured in config/settings.json"
+if [[ -z "$CHAT_IDS" || "$CHAT_IDS" == *YOUR_CHAT_ID_HERE* ]]; then
+    warning "Telegram chat_ids are not configured in config/settings.json"
 fi
 
 # ── 5. Run tests ───────────────────────────────────────────────────────────────

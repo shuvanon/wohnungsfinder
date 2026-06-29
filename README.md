@@ -48,7 +48,8 @@ wohnungsfinder/
 ├── README.md
 ├── config/
 │   ├── loader.py                  # Config validation
-│   └── settings.json              # All user-facing configuration
+│   ├── settings.json.example      # Config template (tracked)
+│   └── settings.json              # Your real config — gitignored, created from the template
 ├── scraper/
 │   ├── fetcher.py                 # HTTP fetching + Livewire pagination
 │   ├── parser.py                  # Livewire snapshots → listing dicts
@@ -110,9 +111,17 @@ If `getUpdates` returns an empty result, try `https://api.telegram.org/botYOUR_T
 
 ### 3. Configure
 
+Create your config from the template, then edit it:
+
 ```bash
-nano ~/services/wohnungsfinder/config/settings.json
+cd ~/services/wohnungsfinder
+cp config/settings.json.example config/settings.json
+nano config/settings.json
 ```
+
+`config/settings.json` is **gitignored**, so your real token and per-machine
+values stay local and `git pull` never touches them. Configuration changes in
+the repo land in `settings.json.example` — copy across anything you want.
 
 Fill in your credentials:
 
