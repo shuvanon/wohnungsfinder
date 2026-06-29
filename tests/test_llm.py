@@ -147,6 +147,20 @@ class TestExtract(unittest.TestCase):
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer secret-123")
 
+    @patch("enrich.llm.requests.post")
+    def test_max_tokens_capped_in_payload(self, mock_post):
+        mock_post.return_value = _chat_response('{"energy_class": "A"}')
+        LLMExtractor({**_CFG, "max_tokens": 256}).extract(_LISTING, "detail text")
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["max_tokens"], 256)
+
+    @patch("enrich.llm.requests.post")
+    def test_max_tokens_defaults_to_512(self, mock_post):
+        mock_post.return_value = _chat_response('{"energy_class": "A"}')
+        LLMExtractor(_CFG).extract(_LISTING, "detail text")  # no max_tokens in cfg
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["max_tokens"], 512)
+
 
 class TestCoercion(unittest.TestCase):
 

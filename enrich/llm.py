@@ -100,6 +100,10 @@ class LLMExtractor:
         self.model: str = cfg.get("model", "")
         self.timeout: int = cfg.get("timeout", 60)
         self.max_detail_chars: int = cfg.get("max_detail_chars", 8000)
+        # Cap generation. The extraction JSON is ~15 small fields, so this is
+        # ample; it exists to bound the worst case — an uncapped model can run
+        # away and generate until it fills the context, blowing the timeout.
+        self.max_tokens: int = cfg.get("max_tokens", 512)
 
         api_key_env = cfg.get("api_key_env", "LLM_API_KEY")
         self.api_key: str = os.environ.get(api_key_env, "") if api_key_env else ""
@@ -164,6 +168,7 @@ class LLMExtractor:
                 {"role": "user", "content": user_content},
             ],
             "temperature": 0,
+            "max_tokens": self.max_tokens,
             "response_format": {"type": "json_object"},
         }
 

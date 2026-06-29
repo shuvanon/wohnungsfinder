@@ -75,7 +75,7 @@ wohnungsfinder/
     ├── test_store.py              # 29 tests
     ├── test_formatter.py          # 14 tests
     ├── test_detail_fetcher.py     # 7 tests
-    ├── test_llm.py                # 24 tests
+    ├── test_llm.py                # 26 tests
     └── test_telegram.py           # 29 tests
 ```
 
@@ -137,7 +137,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 175 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 177 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -273,7 +273,8 @@ backends is a config change, not a code change.
 | `model` | `gemma-2-2b-it` | Model name to request. |
 | `api_key_env` | `LLM_API_KEY` | Name of the **environment variable** holding the API key. Leave the variable unset for a local server that needs no key. |
 | `timeout` | `60` | Per-request timeout in seconds. |
-| `max_detail_chars` | `8000` | Cap on detail-page text sent to the model (bounds cost/latency). |
+| `max_detail_chars` | `8000` | Cap on detail-page text sent to the model (bounds prompt size / latency). Most rent/WBS/energy facts are early on the page; 5000 is a good value for a CPU server. |
+| `max_tokens` | `512` | Cap on the model's output. The extraction JSON is small, so this is ample — it exists to bound the worst case (an uncapped model can run away and generate until it fills the context, blowing the timeout). |
 | `enrich_scope` | `survivors` | `survivors` = cheap-filter on list data first, only enrich passers; `all` = enrich every new listing (detail page is the sole authority). |
 | `max_enrich_per_cycle` | `15` | Max listings enriched per cycle. Leftovers stay pending and drain next cycle. |
 | `max_enrich_seconds` | `480` | Wall-clock cap on the enrichment phase per cycle (`0` = no cap). Keeps a burst from overrunning the scrape interval. |
@@ -324,7 +325,7 @@ python3 -m unittest discover -s tests -v   # no extra dependency
 
 Safe to run anytime, including on the deployment server — every test mocks HTTP and uses in-memory SQLite, so it never touches `settings.json`, the live database, or sends Telegram messages.
 
-175 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
+177 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
 
 ## Updating the code
 
