@@ -104,6 +104,10 @@ class LLMExtractor:
         # ample; it exists to bound the worst case — an uncapped model can run
         # away and generate until it fills the context, blowing the timeout.
         self.max_tokens: int = cfg.get("max_tokens", 512)
+        # Reasoning models (e.g. gemma "thinking" variants) otherwise spend the
+        # whole max_tokens budget on chain-of-thought, leaving the JSON answer
+        # empty/truncated. Extraction needs no reasoning, so turn it off.
+        self.disable_thinking: bool = cfg.get("disable_thinking", True)
 
         api_key_env = cfg.get("api_key_env", "LLM_API_KEY")
         self.api_key: str = os.environ.get(api_key_env, "") if api_key_env else ""
@@ -171,6 +175,10 @@ class LLMExtractor:
             "max_tokens": self.max_tokens,
             "response_format": {"type": "json_object"},
         }
+        if self.disable_thinking:
+            # Honoured by llama.cpp and many OpenAI-compatible servers; harmless
+            # (ignored) on backends that don't recognize it.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         resp = requests.post(
             f"{self.base_url}/chat/completions",

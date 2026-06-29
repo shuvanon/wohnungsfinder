@@ -52,6 +52,7 @@
     "timeout": 60,
     "max_detail_chars": 5000,
     "max_tokens": 512,
+    "disable_thinking": true,
     "enrich_scope": "survivors",
     "max_enrich_per_cycle": 15,
     "max_enrich_seconds": 480

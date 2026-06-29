@@ -161,6 +161,20 @@ class TestExtract(unittest.TestCase):
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["max_tokens"], 512)
 
+    @patch("enrich.llm.requests.post")
+    def test_disables_thinking_by_default(self, mock_post):
+        mock_post.return_value = _chat_response('{"energy_class": "A"}')
+        LLMExtractor(_CFG).extract(_LISTING, "detail text")  # no disable_thinking in cfg
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["chat_template_kwargs"], {"enable_thinking": False})
+
+    @patch("enrich.llm.requests.post")
+    def test_thinking_param_omitted_when_disabled(self, mock_post):
+        mock_post.return_value = _chat_response('{"energy_class": "A"}')
+        LLMExtractor({**_CFG, "disable_thinking": False}).extract(_LISTING, "detail text")
+        _, kwargs = mock_post.call_args
+        self.assertNotIn("chat_template_kwargs", kwargs["json"])
+
 
 class TestCoercion(unittest.TestCase):
 
