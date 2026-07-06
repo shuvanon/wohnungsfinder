@@ -66,5 +66,10 @@
     "store_file": "data/listings.db",
     "log_file":   "logs/scraper.log",
     "log_level":  "INFO"
+  },
+
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8002
   }
 }

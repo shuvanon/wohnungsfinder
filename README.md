@@ -42,7 +42,7 @@ On the **first run**, all current listings are silently saved as "seen" — no n
 ```
 wohnungsfinder/
 ├── main.py                        # Entry point and scrape loop
-├── requirements.txt               # Runtime dependencies (3 packages)
+├── requirements.txt               # Runtime dependencies
 ├── setup.sh                       # One-command Ubuntu server setup
 ├── wohnungsfinder.service         # systemd unit for 24/7 operation
 ├── README.md
@@ -63,6 +63,13 @@ wohnungsfinder/
 ├── notifier/
 │   ├── telegram.py                # Multi-recipient Telegram delivery
 │   └── formatter.py               # Build notification message text
+├── api/
+│   ├── queries.py                 # Read-only DB queries
+│   ├── server.py                  # FastAPI read-only HTTP API
+│   └── wohnungsfinder-api.service # systemd unit for the API
+├── analysis/
+│   ├── metadata.json              # Datasette canned queries + facets
+│   └── datasette.service          # systemd unit for the data browser
 ├── data/
 │   ├── berlin_postcodes.json      # Postcode → Bezirk mapping
 │   └── listings.db                # SQLite database (auto-created on first run)
@@ -77,6 +84,7 @@ wohnungsfinder/
     ├── test_formatter.py          # 14 tests
     ├── test_detail_fetcher.py     # 7 tests
     ├── test_llm.py                # 28 tests
+    ├── test_api.py                # 10 tests
     └── test_telegram.py           # 29 tests
 ```
 
@@ -146,7 +154,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script checks Python version, installs dependencies, runs all 179 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
+The script checks Python version, installs dependencies, runs all 189 tests, and offers to install the systemd service. When asked `Install as a systemd service? [y/N]` → type `y`.
 
 ### 5. Verify
 
@@ -319,6 +327,88 @@ The SQLite database at `data/listings.db` contains two tables:
 
 You can query it directly on the server with `sqlite3`, or copy it to your local machine and open it in a GUI like [TablePlus](https://tableplus.com/) or [DBeaver](https://dbeaver.io/).
 
+### Browse & analyse with Datasette (recommended)
+
+[Datasette](https://datasette.io/) gives an instant read-only web UI over the
+database — per-listing views, one-click facets (district, WBS, energy class,
+heating type), a SQL console, and CSV/JSON export. It opens the DB read-only, so
+it runs safely alongside the scraper.
+
+```bash
+pip install datasette datasette-vega   # datasette-vega adds simple charts
+cd ~/services/wohnungsfinder
+python3 -m datasette serve data/listings.db \
+  --host "$(tailscale ip -4 | head -n1)" --port 8001 \
+  --metadata analysis/metadata.json
+```
+
+Then open `http://<your-tailscale-ip>:8001/` from any device on your tailnet.
+Binding to the Tailscale IP keeps it private to the tailnet. `analysis/metadata.json`
+ships a set of canned queries (passed-by-score, cheapest, stats by district,
+block reasons, WBS/energy breakdowns, enrichment coverage) and facet config.
+
+To run it 24/7, install the bundled unit:
+
+```bash
+sudo cp analysis/datasette.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now datasette
+```
+
+A few ready-made queries for the SQL console (also available as canned queries):
+
+```sql
+-- Passed listings, best score first (latest decision per URL)
+SELECT f.priority, f.score, l.total_rent, l.rooms, l.size_m2, l.district, l.wbs, l.url
+FROM listings l JOIN filter_results f ON f.url = l.url
+WHERE f.id = (SELECT MAX(id) FROM filter_results WHERE url = l.url) AND f.passed = 1
+ORDER BY f.score DESC, l.total_rent ASC;
+
+-- Why listings were blocked
+SELECT block_reason, COUNT(*) AS n FROM filter_results
+WHERE passed = 0 GROUP BY block_reason ORDER BY n DESC;
+```
+
+> **Datasette 1.0+:** canned queries and facets moved from `metadata.json` into a
+> separate `datasette.yaml` config file. If you're on 1.0+, the UI still works;
+> move the `queries`/`facets` blocks per the current Datasette docs, or just
+> paste the SQL above into the SQL console.
+
+## HTTP API (read-only)
+
+A small **FastAPI** service exposes the listings as JSON so other tools (e.g. an
+auto-applier) can consume them over the network without touching the SQLite file.
+It opens the DB read-only (`PRAGMA query_only`), safe alongside the scraper.
+
+```bash
+pip install fastapi uvicorn
+cd ~/services/wohnungsfinder
+python3 -m uvicorn api.server:app --host "$(tailscale ip -4 | head -n1)" --port 8002
+```
+
+Bind to the Tailscale IP to keep it private to the tailnet. Interactive docs are
+auto-generated at `/docs`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Status, listing count, schema version |
+| `GET /listings` | All listings (datasheet without `detail_text`), newest first. Filters: `limit`, `offset`, `district`, `min_rent`, `max_rent`, `wbs` |
+| `GET /listing?url=<urlencoded>` | One listing's full datasheet (incl. `detail_text`) |
+| `GET /candidates` | **Passed** listings + `priority`/`score`, newest first. `since=<ISO seen_at>` for incremental polling; `limit`/`offset` |
+
+Configure the local bind host/port in the `api` block of `settings.json` (used by
+`python3 -m api.server` for dev). To run it 24/7, install the bundled unit:
+
+```bash
+sudo cp api/wohnungsfinder-api.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now wohnungsfinder-api
+```
+
+Example — poll for new candidates:
+
+```bash
+curl "http://<your-tailscale-ip>:8002/candidates?limit=20"
+```
+
 ## Running tests
 
 ```bash
@@ -335,7 +425,7 @@ python3 -m unittest discover -s tests -v   # no extra dependency
 
 Safe to run anytime, including on the deployment server — every test mocks HTTP and uses in-memory SQLite, so it never touches `settings.json`, the live database, or sends Telegram messages.
 
-179 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, formatter, and Telegram notifier.
+189 tests covering parser, hard filter, priority scorer, store, detail fetcher, LLM extraction, API, formatter, and Telegram notifier.
 
 ## Updating the code
 

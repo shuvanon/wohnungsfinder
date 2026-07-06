@@ -1,0 +1,23 @@
+[Unit]
+Description=Wohnungsfinder read-only API
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=shuvanon
+Group=shuvanon
+WorkingDirectory=/home/shuvanon/services/wohnungsfinder
+
+# Wait for Tailscale, then bind ONLY to this host's Tailscale IP so the API is
+# reachable on the tailnet and nowhere else. Read-only DB access — safe next to
+# the scraper's WAL writes. (If you use a venv, point uvicorn at its python.)
+ExecStartPre=/bin/bash -lc 'until tailscale ip -4 >/dev/null 2>&1; do sleep 2; done'
+ExecStart=/bin/bash -lc 'python3 -m uvicorn api.server:app --host "$(tailscale ip -4 | head -n1)" --port 8002'
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
