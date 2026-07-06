@@ -3,6 +3,8 @@ Description=Wohnungsfinder read-only API
 After=network-online.target tailscaled.service
 Wants=network-online.target
 Requires=tailscaled.service
+# Group with the scraper under wohnungsfinder.target (grouped stop/restart).
+PartOf=wohnungsfinder.target
 
 [Service]
 Type=simple

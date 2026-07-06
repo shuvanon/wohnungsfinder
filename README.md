@@ -45,6 +45,7 @@ wohnungsfinder/
 ├── requirements.txt               # Runtime dependencies
 ├── setup.sh                       # One-command Ubuntu server setup
 ├── wohnungsfinder.service         # systemd unit for 24/7 operation
+├── wohnungsfinder.target          # groups scraper + API under one handle
 ├── README.md
 ├── config/
 │   ├── loader.py                  # Config validation
@@ -408,6 +409,34 @@ Example — poll for new candidates:
 ```bash
 curl "http://<your-tailscale-ip>:8002/candidates?limit=20"
 ```
+
+### Running the scraper + API together
+
+The scraper and the API are **separate services** (independent failure — an API
+crash can't take down the scraper). `wohnungsfinder.target` groups them under one
+handle: the target `Wants=` both, and each service is `PartOf=` the target, so
+`stop`/`restart` on the target propagates to both.
+
+```bash
+sudo cp wohnungsfinder.service     /etc/systemd/system/   # (edit User/WorkingDirectory)
+sudo cp api/wohnungsfinder-api.service /etc/systemd/system/
+sudo cp wohnungsfinder.target      /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wohnungsfinder.target         # starts both, and at boot
+
+# grouped control
+sudo systemctl restart wohnungsfinder.target              # restarts both
+sudo systemctl stop    wohnungsfinder.target              # stops both
+systemctl list-dependencies wohnungsfinder.target         # see the group
+
+# individual control still works
+sudo systemctl restart wohnungsfinder-api
+```
+
+The target's `Wants=` starts both even if the individual services aren't
+separately enabled, so you can manage everything through the target alone
+(optionally `systemctl disable wohnungsfinder wohnungsfinder-api` so only the
+target autostarts them).
 
 ## Running tests
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Wohnungsfinder — scraper + read-only API
+# Weak deps: best-effort start both, independent failure (one crashing does not
+# take down the other). PartOf on each service handles grouped stop/restart.
+Wants=wohnungsfinder.service wohnungsfinder-api.service
+After=wohnungsfinder.service wohnungsfinder-api.service
+
+[Install]
+WantedBy=multi-user.target

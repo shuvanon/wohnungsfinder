@@ -2,6 +2,9 @@
 Description=Berlin Wohnungsfinder Scraper
 After=network-online.target
 Wants=network-online.target
+# Group with the API under wohnungsfinder.target so stop/restart of the target
+# propagates here. Independent otherwise (a target restart, not a hard bind).
+PartOf=wohnungsfinder.target
 
 [Service]
 # ── Change these two lines to match your setup ────────────────────────────────
