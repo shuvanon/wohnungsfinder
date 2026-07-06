@@ -1,0 +1,48 @@
+{
+  "title": "Wohnungsfinder",
+  "description_html": "Berlin apartment listings (detail-enriched) plus the filter / score history.",
+  "databases": {
+    "listings": {
+      "tables": {
+        "listings": {
+          "sort_desc": "seen_at",
+          "facets": ["district", "wbs", "energy_class", "heating_type"]
+        },
+        "filter_results": {
+          "sort_desc": "seen_at",
+          "facets": ["passed", "priority", "block_reason"]
+        }
+      },
+      "queries": {
+        "passed_by_score": {
+          "title": "Passed listings, best score first",
+          "sql": "SELECT f.priority, f.score, l.total_rent, l.cold_rent, l.rooms, l.size_m2, l.district, l.wbs, l.energy_class, l.heating_type, l.address, l.url FROM listings l JOIN filter_results f ON f.url = l.url WHERE f.id = (SELECT MAX(id) FROM filter_results WHERE url = l.url) AND f.passed = 1 ORDER BY f.score DESC, l.total_rent ASC"
+        },
+        "cheapest_passed": {
+          "title": "Cheapest passed listings",
+          "sql": "SELECT l.total_rent, l.cold_rent, l.rooms, l.size_m2, l.district, l.wbs, l.address, l.url FROM listings l JOIN filter_results f ON f.url = l.url WHERE f.id = (SELECT MAX(id) FROM filter_results WHERE url = l.url) AND f.passed = 1 ORDER BY l.total_rent ASC"
+        },
+        "by_district": {
+          "title": "Stats by district",
+          "sql": "SELECT district, COUNT(*) AS n, ROUND(AVG(total_rent)) AS avg_total_rent, MIN(total_rent) AS min_total_rent, ROUND(AVG(size_m2)) AS avg_m2 FROM listings WHERE total_rent IS NOT NULL GROUP BY district ORDER BY n DESC"
+        },
+        "block_reasons": {
+          "title": "Why listings were blocked",
+          "sql": "SELECT block_reason, COUNT(*) AS n FROM filter_results WHERE passed = 0 AND block_reason IS NOT NULL GROUP BY block_reason ORDER BY n DESC"
+        },
+        "wbs_breakdown": {
+          "title": "WBS requirement breakdown",
+          "sql": "SELECT wbs, COUNT(*) AS n FROM listings GROUP BY wbs ORDER BY n DESC"
+        },
+        "energy_breakdown": {
+          "title": "Energy class breakdown",
+          "sql": "SELECT energy_class, COUNT(*) AS n FROM listings WHERE energy_class IS NOT NULL GROUP BY energy_class ORDER BY energy_class"
+        },
+        "enrichment_coverage": {
+          "title": "How many listings have been detail-enriched",
+          "sql": "SELECT SUM(detail_fetched_at IS NOT NULL) AS enriched, SUM(detail_fetched_at IS NULL) AS pending_or_skipped, COUNT(*) AS total FROM listings"
+        }
+      }
+    }
+  }
+}

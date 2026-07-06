@@ -1,0 +1,29 @@
+[Unit]
+Description=Datasette — wohnungsfinder data browser
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=shuvanon
+Group=shuvanon
+WorkingDirectory=/home/shuvanon/services/wohnungsfinder
+
+# Wait for Tailscale, then bind ONLY to this host's Tailscale IP so the
+# browser is reachable on the tailnet and nowhere else. The DB opens
+# read-only (Datasette's default), safe to run alongside the scraper's WAL writes.
+ExecStartPre=/bin/bash -lc 'until tailscale ip -4 >/dev/null 2>&1; do sleep 2; done'
+ExecStart=/bin/bash -lc 'python3 -m datasette serve data/listings.db \
+  --host "$(tailscale ip -4 | head -n1)" \
+  --port 8001 \
+  --metadata analysis/metadata.json \
+  --setting truncate_cells_html 140 \
+  --setting sql_time_limit_ms 8000 \
+  --setting allow_download off'
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

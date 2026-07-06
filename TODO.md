@@ -60,3 +60,80 @@ tests.
   interval between them.
 - Scrapes still fire on the polite ~15-min cadence regardless of enrichment load.
 - Idle (empty queue) does not busy-spin.
+
+---
+
+## TICKET-2 — Datasette data browser (config drafted, pending install)
+
+**Status:** open · **Priority:** low
+
+Read-only web UI over `data/listings.db` for per-listing lookup, facets, and
+ad-hoc SQL — viewed over Tailscale.
+
+**Already drafted (uncommitted, in `analysis/`):**
+- `analysis/metadata.json` — title, facets (district / wbs / energy_class /
+  heating_type), and 7 canned queries (passed-by-score, cheapest, by-district,
+  block-reasons, wbs/energy breakdowns, enrichment-coverage).
+- `analysis/datasette.service` — systemd unit binding only to the Tailscale IP,
+  read-only.
+- README "Browse & analyse with Datasette" section.
+
+**To finish:** commit `analysis/` + README; on the server `pip install datasette
+datasette-vega`, `git pull`, install + enable the systemd unit, open
+`http://<tailscale-ip>:8001/`.
+
+**Watch out:** Datasette 1.0+ moves canned queries/facets from `metadata.json`
+into `datasette.yaml` — convert if on 1.0+ (SQL console works regardless).
+
+---
+
+## TICKET-3 — Grafana data dashboards (SQLite)
+
+**Status:** open · **Priority:** low
+
+Grafana has **no native SQLite datasource**. Two routes:
+- **Route A (recommended):** `frser-sqlite-datasource` plugin → add datasource
+  pointing at the absolute DB path → SQL panels.
+  - Gotcha 1: the `grafana` user must be able to read the DB file + its `-wal`
+    and `-shm` sidecars under `/home/shuvanon/…` (group-read or ACL
+    `setfacl -m u:grafana:rX`). Plugin opens read-only — safe with the scraper.
+  - Gotcha 2: `seen_at` is an ISO string; for time panels convert to epoch:
+    `CAST(strftime('%s', seen_at) AS INTEGER) * 1000 AS "time"`.
+- **Route B:** `yesoreyeram-infinity-datasource` → pull Datasette JSON
+  (`/listings/<query>.json?_shape=array`). Decoupled, reuses Datasette (TICKET-2),
+  but fiddlier parsing.
+
+**Starter time-series panels:** listings discovered per day, % blocked over
+time, avg `total_rent` trend, HIGH-priority count per day, enrichment backlog
+(`processed_at IS NULL`) over time. (Per-listing lookup stays in Datasette;
+Grafana is for the aggregate/time view.)
+
+---
+
+## TICKET-4 — Logs in the browser (Loki + Grafana) — replace `journalctl -f`
+
+**Status:** open · **Priority:** low
+
+Live log tail + search in Grafana instead of a terminal. Grafana can't read
+journald directly — needs Loki.
+
+**Stack:** Loki (single binary, filesystem storage, `:3100`) + Grafana Alloy
+(log shipper; replaces Promtail) + Grafana Loki datasource.
+
+**Process:**
+1. Install Loki as a systemd service (minimal single-node config).
+2. Install Alloy with a `loki.source.journal` filtered to
+   `unit = wohnungsfinder.service` → `loki.write` → `http://localhost:3100/loki/api/v1/push`.
+   Alloy needs journal read access (run as root or add to `systemd-journal` group).
+3. Add Loki datasource in Grafana.
+4. **Explore → Loki →** `{unit="wohnungsfinder.service"}` → toggle **Live** for
+   realtime tail. Add as a Logs panel for an always-on view.
+
+**Bonus:** LogQL filters (`|= "BLOCKED"`, `|= "LLM call failed"`); derive
+log-based metrics/alerts (e.g. alert when `LLM call failed` spikes). Add other
+units (`datasette.service`, `llama-server.service`) as more `unit` labels.
+
+**Watch out:**
+- Enable persistent journald (`Storage=persistent` in journald.conf) for history
+  across reboots — or ship `logs/scraper.log` via `loki.source.file` instead.
+- Set a Loki retention period (e.g. 30 days).
