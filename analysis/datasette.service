@@ -6,9 +6,11 @@ Requires=tailscaled.service
 
 [Service]
 Type=simple
-User=shuvanon
-Group=shuvanon
-WorkingDirectory=/home/shuvanon/services/wohnungsfinder
+# ── Change these to match your setup ──────────────────────────────────────────
+User=youruser
+Group=youruser
+WorkingDirectory=/home/youruser/wohnungsfinder
+# ──────────────────────────────────────────────────────────────────────────────
 
 # Wait for Tailscale, then bind ONLY to this host's Tailscale IP so the
 # browser is reachable on the tailnet and nowhere else. The DB opens
