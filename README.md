@@ -1,6 +1,13 @@
 # Wohnungsfinder Scraper
 
-Monitors [inberlinwohnen.de](https://www.inberlinwohnen.de/wohnungsfinder) every ~12 minutes and sends Telegram notifications for new apartment listings. Supports hard filtering (block WBS-only, keywords, rent limits) and priority scoring (🔴 HIGH / 🟡 MEDIUM / ⚪ LOW). Notifies one or multiple people simultaneously.
+Monitors [inberlinwohnen.de](https://www.inberlinwohnen.de/wohnungsfinder) — the joint listings portal of Berlin's state-owned housing companies — and sends a Telegram notification for each new apartment that matches your criteria.
+
+- **Hard filters** drop listings you can't or don't want (WBS requirement, rent cap, room range, blocked keywords).
+- **Priority scoring** labels the rest 🔴 HIGH / 🟡 MEDIUM / ⚪ LOW from your own rules.
+- **Optional LLM enrichment** opens each listing's detail page on the landlord's own site and re-reads the whole datasheet, correcting frequently-wrong list data (a rent shown as 600 € that is really 1100 €, a hidden WBS requirement, …).
+- **Read-only HTTP API** (FastAPI) so other tools can consume the listings.
+- **Datasette config** for browsing and querying the database in a browser.
+- Notifies one or several recipients at once.
 
 ## How it works
 
@@ -463,3 +470,26 @@ cd ~/services/wohnungsfinder
 git pull
 sudo systemctl restart wohnungsfinder
 ```
+
+## Responsible use
+
+This is a personal tool, published for reference and for personal use. If you run it:
+
+- **Be polite to the sites you scrape.** The defaults are deliberately gentle —
+  one pass every ~12 minutes with random jitter, and detail-page fetches are
+  naturally spaced by the enrichment step. Please don't shorten the interval or
+  strip the pacing.
+- **Check the Terms of Use** of inberlinwohnen.de and of each landlord's site
+  before running it, and comply with them. How you use this tool is your
+  responsibility.
+- **Keep the API private.** It has no authentication: it defaults to `127.0.0.1`
+  and is meant to be bound to a private address (e.g. a VPN/tailnet IP). Binding
+  it to `0.0.0.0` exposes your listings database, read-only, to the network.
+- **Never commit your config.** `config/settings.json` holds your Telegram bot
+  token and is gitignored — use `config/settings.json.example` as the template.
+- This project is **not affiliated with, endorsed by, or associated with**
+  inberlinwohnen.de or any of the Berlin housing companies.
+
+## License
+
+[MIT](LICENSE) © 2026 Shuvanon Razik
